@@ -39,6 +39,58 @@ async def _run_py(args: Sequence[str], *, timeout_seconds: float) -> tuple[int, 
     return proc.returncode or 0, stdout, stderr
 
 
+async def _configure_pim_shortcuts() -> None:
+    r"""Register PIM's per-user shortcuts by running ``py install --configure --yes`` once.
+
+    The Python Install Manager creates shims such as ``python.exe``, ``pip.exe``,
+    ``pipx.exe``, and ``python3.14.exe`` in ``%LOCALAPPDATA%\Python\bin`` and adds that
+    directory to the user PATH. Without ``py install --configure``, a freshly installed
+    runtime is reachable only through ``py -<tag>``. That breaks downstream tools such as
+    pip and pipx, which expect the canonical names on PATH.
+
+    A fast existence check gates the call, so the subprocess runs only the first time a
+    runtime is installed on a machine. ``--yes`` accepts the long-path-support and
+    PATH-registration prompts without interaction.
+
+    Keep this logic in a standalone function rather than inline in
+    :meth:`PIMEnvironment.setup`. ``setup`` returns early on non-Windows platforms, so an
+    inline body would be unreachable there. Type checkers analyzing the code as macOS or
+    Linux stop narrowing types in that dead branch and report false positives. A separate
+    function is always reachable, so the checker analyzes its control flow the same way on
+    every platform.
+    """
+    local_app_data = os.environ.get('LOCALAPPDATA')
+    if not local_app_data:
+        logger.debug('LOCALAPPDATA not set; skipping PIM --configure')
+        return
+
+    bin_dir = Path(local_app_data) / 'Python' / 'bin'
+    if (bin_dir / 'python.exe').exists():
+        logger.debug('PIM bin directory already populated at %s; skipping --configure', bin_dir)
+        return
+
+    configure_logger = logging.getLogger('porringer.pim.configure')
+    configure_logger.info('Running py install --configure --yes to register PIM shortcuts')
+    try:
+        returncode, stdout, stderr = await _run_py(
+            ['install', '--configure', '--yes'],
+            timeout_seconds=120,
+        )
+    except FileNotFoundError:
+        configure_logger.debug('py launcher not found; cannot run --configure')
+        return
+    except (TimeoutError, OSError) as exc:
+        configure_logger.warning('py install --configure --yes failed: %s', exc)
+        return
+
+    if returncode != 0:
+        configure_logger.warning('py install --configure --yes failed (rc=%s): %s', returncode, stderr.strip())
+        return
+    stdout = stdout.strip()
+    if stdout:
+        configure_logger.debug('py install --configure --yes output: %s', stdout)
+
+
 class PIMEnvironment(Environment, RuntimeProvider):
     """Represents a Python runtime environment managed by Python Install Manager (pymanager).
 
@@ -235,57 +287,14 @@ class PIMEnvironment(Environment, RuntimeProvider):
 
     @override
     async def setup(self) -> None:
-        r"""Run ``py install --configure --yes`` once, if not already configured.
+        """Register PIM's shortcuts on Windows, if not already configured.
 
-        PIM's per-user shortcuts directory (``%LOCALAPPDATA%\\Python\\bin``)
-        contains shims like ``python.exe``, ``pip.exe``, ``pipx.exe``,
-        and ``python3.14.exe`` that are created and registered on the
-        user PATH by ``py install --configure``.  Without that step,
-        a freshly-installed PIM runtime is only reachable via ``py
-        -<tag>``, which breaks any downstream tool (pipx, pip, custom
-        scripts) that expects the canonical names on PATH.
-
-        The call is gated by a fast existence check so the subprocess
-        is only invoked the first time a runtime is installed on a
-        machine.  ``--yes`` accepts the long-path-support and PATH-
-        registration prompts non-interactively.
-
-        No-op on non-Windows platforms (PIM itself is Windows-only,
-        but this is a defensive guard).
+        Do nothing on non-Windows platforms. PIM supports Windows only.
+        :func:`_configure_pim_shortcuts` holds the configuration logic.
         """
         if sys.platform != 'win32':
             return
-
-        local_app_data = os.environ.get('LOCALAPPDATA')
-        if not local_app_data:
-            logger.debug('LOCALAPPDATA not set; skipping PIM --configure')
-            return
-
-        bin_dir = Path(local_app_data) / 'Python' / 'bin'
-        if (bin_dir / 'python.exe').exists():
-            logger.debug('PIM bin directory already populated at %s; skipping --configure', bin_dir)
-            return
-
-        configure_logger = logging.getLogger('porringer.pim.configure')
-        configure_logger.info('Running py install --configure --yes to register PIM shortcuts')
-        try:
-            returncode, stdout, stderr = await _run_py(
-                ['install', '--configure', '--yes'],
-                timeout_seconds=120,
-            )
-        except FileNotFoundError:
-            configure_logger.debug('py launcher not found; cannot run --configure')
-            return
-        except (TimeoutError, OSError) as exc:
-            configure_logger.warning('py install --configure --yes failed: %s', exc)
-            return
-
-        if returncode != 0:
-            configure_logger.warning('py install --configure --yes failed (rc=%s): %s', returncode, stderr.strip())
-            return
-        stdout = stdout.strip()
-        if stdout:
-            configure_logger.debug('py install --configure --yes output: %s', stdout)
+        await _configure_pim_shortcuts()
 
     @override
     def install_command(
