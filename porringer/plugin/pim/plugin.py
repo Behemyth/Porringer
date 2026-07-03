@@ -52,12 +52,9 @@ async def _configure_pim_shortcuts() -> None:
     runtime is installed on a machine. ``--yes`` accepts the long-path-support and
     PATH-registration prompts without interaction.
 
-    Keep this logic in a standalone function rather than inline in
-    :meth:`PIMEnvironment.setup`. ``setup`` returns early on non-Windows platforms, so an
-    inline body would be unreachable there. Type checkers analyzing the code as macOS or
-    Linux stop narrowing types in that dead branch and report false positives. A separate
-    function is always reachable, so the checker analyzes its control flow the same way on
-    every platform.
+    Kept separate from :meth:`PIMEnvironment.setup`: inlining it under that method's
+    ``sys.platform`` guard makes the body unreachable off Windows, where type checkers
+    then stop narrowing types and report false positives.
     """
     local_app_data = os.environ.get('LOCALAPPDATA')
     if not local_app_data:
