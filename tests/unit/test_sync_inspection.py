@@ -136,7 +136,9 @@ class TestSyncInspection:
         mock_resolve.assert_not_awaited()
         assert report.inspection_mode == InspectionMode.FAST
         assert report.summary.actions == 1
-        assert report.manifests[0].actions[0].status == InspectionStatus.NEEDED
+        # FAST never probes presence, so a would-be NEEDED action reports
+        # UNKNOWN instead — NEEDED must only mean 'checked and confirmed absent'.
+        assert report.manifests[0].actions[0].status == InspectionStatus.UNKNOWN
         assert report.manifests[0].actions[0].installed_version is None
 
     @staticmethod
@@ -187,7 +189,7 @@ def test_preview_cli_fast_json(tmp_path: Path, test_config) -> None:
     payload = json.loads(result.output)
     assert payload['inspection_mode'] == InspectionMode.FAST.value
     assert payload['summary']['actions'] == 1
-    assert payload['manifests'][0]['actions'][0]['status'] == InspectionStatus.NEEDED.value
+    assert payload['manifests'][0]['actions'][0]['status'] == InspectionStatus.UNKNOWN.value
 
 
 @pytest.mark.mock_packages
@@ -203,20 +205,26 @@ def test_preview_cli_envelope(tmp_path: Path, test_config) -> None:
     assert payload['event_type'] == 'result'
     assert payload['operation'] == 'sync.inspect'
     assert payload['summary']['total'] == 1
-    assert payload['follow_up_actions'][0]['action_id'] == '0:0'
+    # FAST reports UNKNOWN (not NEEDED), so it must not suggest a 'Run action'
+    # follow-up for an action whose presence was never actually checked.
+    assert payload['follow_up_actions'] == []
 
 
 @pytest.mark.mock_packages
 def test_preview_cli_explain(tmp_path: Path, test_config) -> None:
-    """``porringer preview --explain`` renders diagnostics and Follow-up actions."""
+    """``porringer preview --explain`` renders diagnostics for a fast inspection.
+
+    FAST reports UNKNOWN (not NEEDED), so it produces no 'Run action'
+    follow-up — explain output is just the summary line.
+    """
     _write_manifest(tmp_path, {'version': '1', 'packages': {'python': ['requests']}})
     runner = CliRunner()
 
     result = runner.invoke(app, ['preview', str(tmp_path), '--mode', 'fast', '--explain'], obj=test_config)
 
     assert result.exit_code == 0
-    assert 'Follow-up actions:' in result.output
-    assert '0:0: Run action' in result.output
+    assert '1 action(s)' in result.output
+    assert 'Follow-up actions:' not in result.output
 
 
 @pytest.mark.mock_packages

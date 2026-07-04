@@ -42,6 +42,8 @@ Use complete mode for final diagnostics. Use fast mode for live refresh loops wh
 
 Fast reports and complete reports share the same JSON shape. A client can render fast previews during editing, then run complete preview when the user asks for evidence or is about to execute.
 
+Fast mode never probes presence, so it cannot tell "needed" apart from "not checked". Actions that would be `needed` under complete inspection instead report `unknown` — treat `unknown` as "not yet known", not as "run this". Never present a fast report as the basis for a confirmation prompt; always run `complete` inspection immediately before asking a human (or executing) to act.
+
 ## JSON Output
 
 `--json` emits a `SyncInspectionReport`:
@@ -67,7 +69,7 @@ Each action includes:
 | `index` | Display order in the filtered report. |
 | `ref` | Stable identity with manifest index, action index, and action ID. |
 | `action_id` | Compact correlation key such as `0:3`. |
-| `status` | `needed`, `satisfied`, `update_available`, `unavailable`, `failed`, or `skipped`. |
+| `status` | `needed`, `satisfied`, `update_available`, `unavailable`, `failed`, `skipped`, or `unknown`. |
 | `action` | JSON-stable action data such as kind, ecosystem, installer, package, and command. |
 | `cli_command` | Native command preview when one can be rendered. |
 | `message` | Presence, update, skip, or error context. |

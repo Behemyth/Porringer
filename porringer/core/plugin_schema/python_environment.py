@@ -55,6 +55,36 @@ def _pick_highest_version(releases: dict[str, object], *, stable_only: bool) -> 
     return best
 
 
+def _running_in_isolated_app_venv() -> bool:
+    """Return whether porringer itself runs from an isolated pipx-managed venv.
+
+    ``pipx install porringer`` places porringer in its own dedicated
+    virtual environment and writes a ``pipx_metadata.json`` marker into
+    the venv prefix.  When that is the case ``sys.executable`` points at
+    porringer's private interpreter, which has none of the user's
+    packages/tools — so package presence detection and generated install
+    commands must target the user's default interpreter instead.
+    """
+    return (Path(sys.prefix) / 'pipx_metadata.json').is_file()
+
+
+def _default_python() -> str:
+    """Return the interpreter to target when no runtime override applies.
+
+    Normally this is the running interpreter (``sys.executable``).  But
+    when porringer runs from a frozen binary (``sys.frozen``) or from an
+    isolated pipx-managed venv, ``sys.executable`` is *not* the user's
+    environment, so prefer a real Python found on ``PATH``.  Falls back
+    to ``sys.executable`` when no PATH Python can be located.
+    """
+    if getattr(sys, 'frozen', False) or _running_in_isolated_app_venv():
+        for candidate in ('python', 'python3'):
+            found = shutil.which(candidate)
+            if found is not None:
+                return found
+    return sys.executable
+
+
 class PythonEnvironment(Environment, RuntimeConsumer):
     """Base for plugins that install packages into a Python environment.
 
@@ -122,7 +152,7 @@ class PythonEnvironment(Environment, RuntimeConsumer):
 
         # Determine which interpreter to probe
         exe = runtime_context.get(cls.consumed_runtime_kind())
-        python = str(exe) if exe is not None else sys.executable
+        python = str(exe) if exe is not None else _default_python()
 
         return cls._probe_module(python, tool)
 
@@ -179,20 +209,15 @@ class PythonEnvironment(Environment, RuntimeConsumer):
                 return str(exe)
             _logger.debug('python_command: runtime_context present but no entry for kind=%s', kind)
         else:
-            _logger.debug('python_command: no runtime_context supplied, falling back to sys.executable')
+            _logger.debug('python_command: no runtime_context supplied, falling back to default interpreter')
 
-        # In frozen applications (e.g. PyInstaller), sys.executable is
-        # the packaged binary — not a Python interpreter.  Attempt to
-        # find a real Python on PATH before falling back.
-        if getattr(sys, 'frozen', False):
-            _logger.debug('python_command: frozen application detected, trying shutil.which')
-            which_python = shutil.which('python')
-            if which_python is not None:
-                _logger.debug('python_command: using PATH python %s', which_python)
-                return which_python
-            _logger.debug('python_command: shutil.which found no python, falling back to sys.executable')
-
-        return sys.executable
+        # When porringer runs from a frozen binary or an isolated pipx
+        # venv, sys.executable is not the user's interpreter — prefer a
+        # real Python found on PATH.  In the normal case this simply
+        # returns sys.executable.
+        resolved = _default_python()
+        _logger.debug('python_command: using default interpreter %s', resolved)
+        return resolved
 
     @staticmethod
     def package_python(package_name: str) -> str | None:

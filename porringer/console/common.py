@@ -28,18 +28,33 @@ def create_api(configuration: ConsoleConfiguration) -> API:
 def confirm_or_abort(configuration: ConsoleConfiguration, *, yes: bool, prompt: str) -> None:
     """Require confirmation for *prompt* unless ``yes`` was provided.
 
-    Uses the prompt's ``abort`` behaviour so a declined or non-interactive
-    prompt raises :class:`typer.Abort`. That is turned into an actionable
-    message naming the non-interactive options.
+    An explicit decline (answering "n") is a normal outcome, so it prints a
+    plain "Aborted." and exits cleanly. Ctrl-C is likewise a normal manual
+    cancellation and gets the same plain treatment. Only when there is no
+    interactive terminal to prompt on at all (confirmation genuinely can't
+    be obtained) does this exit with a failure and an actionable hint
+    naming the non-interactive options.
     """
     if yes:
         return
 
+    console = configuration.output.console
     try:
-        typer.confirm(prompt, default=False, abort=True)
-    except typer.Abort:
+        # markup=False: the "[y/N]" default hint would otherwise be parsed
+        # as a (invalid, unclosed) Rich style tag and silently disappear.
+        answer = console.input(f'{prompt} [y/N]: ', markup=False).strip().lower()
+    except KeyboardInterrupt:
+        console.print()
+        configuration.output.print('[muted]Aborted.[/muted]')
+        raise typer.Exit(EXIT_SUCCESS) from None
+    except EOFError:
+        console.print()
         configuration.output.warning('Aborted. Pass --yes or set PORRINGER_ASSUME_YES=1 to run non-interactively.')
         raise typer.Exit(EXIT_FAILURE) from None
+
+    if answer not in {'y', 'yes'}:
+        configuration.output.print('[muted]Aborted.[/muted]')
+        raise typer.Exit(EXIT_SUCCESS)
 
 
 async def sniff_profile(api: API, url: str) -> SetupProfile | None:
@@ -140,10 +155,16 @@ def build_setup_parameters(
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
     plugins: set[str] | None = None,
     action_ids: set[str] | None = None,
-    inspection_mode: InspectionMode = InspectionMode.FAST,
+    inspection_mode: InspectionMode = InspectionMode.COMPLETE,
     fail_fast: bool = True,
 ) -> SetupParameters:
-    """Construct :class:`SetupParameters` shared by install and preview."""
+    """Construct :class:`SetupParameters` shared by install and preview.
+
+    Defaults to ``COMPLETE`` inspection, matching ``SetupParameters``'
+    own default. Callers that genuinely want a cheap shape-only pass
+    (e.g. untrusted profile links) should pass ``InspectionMode.FAST``
+    explicitly rather than relying on this helper's default.
+    """
     return SetupParameters(
         paths=paths,
         project_directory=project_directory,

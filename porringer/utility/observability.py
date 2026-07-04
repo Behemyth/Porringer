@@ -111,6 +111,7 @@ def inspection_result_summary(report: SyncInspectionReport) -> ResultSummary:
             'update_available': summary.update_available,
             'unavailable': summary.unavailable,
             'skipped': summary.skipped,
+            'unknown': summary.unknown,
         },
     )
 

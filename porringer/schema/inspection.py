@@ -28,6 +28,11 @@ class InspectionStatus(StrEnum):
     UNAVAILABLE = 'unavailable'
     FAILED = 'failed'
     SKIPPED = 'skipped'
+    UNKNOWN = 'unknown'
+    """Presence/update was never probed (``InspectionMode.FAST``) — distinct
+    from :attr:`NEEDED`, which means presence was checked and the action is
+    genuinely absent. Never rely on ``UNKNOWN`` implying an action should run.
+    """
 
 
 class ActionSnapshot(PorringerModel):
@@ -129,6 +134,7 @@ class InspectionSummary(PorringerModel):
     unavailable: int = 0
     failed: int = 0
     skipped: int = 0
+    unknown: int = 0
 
 
 class SyncInspectionReport(PorringerModel):

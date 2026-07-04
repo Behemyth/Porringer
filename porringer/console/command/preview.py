@@ -1,6 +1,6 @@
 """CLI command implementation for preview.
 
-Porringer CLI preview command.
+Inspects a manifest or setup profile and reports the plan without executing anything.
 """
 
 import asyncio
@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from rich.markup import escape
 from rich.panel import Panel
-from rich.table import Table
 
 from porringer.console.common import (
     EXIT_FAILURE,
@@ -27,7 +27,14 @@ from porringer.console.common import (
     resolve_target_or_exit,
 )
 from porringer.console.schema import ConsoleConfiguration
-from porringer.schema import ActionInspection, InspectionMode, SyncInspectionReport, SyncStrategy
+from porringer.schema import (
+    ActionInspection,
+    InspectionMode,
+    InspectionStatus,
+    InspectionSummary,
+    SyncInspectionReport,
+    SyncStrategy,
+)
 from porringer.utility.observability import explain_inspection_report, inspection_envelope
 
 
@@ -55,15 +62,78 @@ def _parse_inspection_mode(configuration: ConsoleConfiguration, mode: str) -> In
 
 
 def _command_text(action: ActionInspection) -> str:
-    """Return display text for an inspected action command."""
-    if action.cli_command:
-        return ' '.join(action.cli_command)
-    return action.action.description
+    r"""Return display text for an inspected action command.
+
+    Shortens the leading token to its executable basename, so a full
+    interpreter path like ``C:\...\Scripts\python.exe`` becomes
+    ``python.exe``. This keeps long absolute paths from wrapping across
+    lines in the table. Plain command names (``git``, ``pdm``) pass
+    through unchanged.
+    """
+    if not action.cli_command:
+        return action.action.description
+    head, *rest = action.cli_command
+    return ' '.join((Path(head).name, *rest))
+
+
+# Glyph shown before each status label in the preview table. Colour comes
+# from the matching ``status.<value>`` style in PORRINGER_THEME, so both
+# live in one place: output.py owns colour, this dict owns the glyph.
+_STATUS_GLYPHS: dict[InspectionStatus, str] = {
+    InspectionStatus.SATISFIED: '✓',
+    InspectionStatus.NEEDED: '●',
+    InspectionStatus.UPDATE_AVAILABLE: '↑',
+    InspectionStatus.UNAVAILABLE: '✗',
+    InspectionStatus.FAILED: '✗',
+    InspectionStatus.SKIPPED: '⊝',
+    InspectionStatus.UNKNOWN: '?',
+}
+
+# Labels for non-zero summary counts, in display order. Zero counts are
+# omitted so the summary line stays short on the common "mostly satisfied"
+# case instead of always spelling out every status at 0.
+_SUMMARY_LABELS: tuple[tuple[str, str], ...] = (
+    ('needed', 'needed'),
+    ('update_available', 'update available'),
+    ('unavailable', 'unavailable'),
+    ('failed', 'failed'),
+    ('skipped', 'skipped'),
+    ('unknown', 'unknown'),
+    ('satisfied', 'satisfied'),
+)
+
+
+def _status_text(status: InspectionStatus) -> str:
+    """Return a themed, glyph-prefixed status label for the preview list."""
+    style = f'status.{status.value}'
+    glyph = _STATUS_GLYPHS.get(status, '')
+    return f'[{style}]{glyph} {status.value}[/{style}]'
+
+
+def _summary_text(summary: InspectionSummary) -> str:
+    """Render non-zero summary counts, coloured to match the status glyphs."""
+    parts = [
+        f'[status.{field}]{count} {label}[/status.{field}]'
+        for field, label in _SUMMARY_LABELS
+        if (count := getattr(summary, field))
+    ]
+    body = ', '.join(parts) if parts else '[muted]nothing to do[/muted]'
+    return f'{summary.actions} action(s): {body}'
 
 
 def _display_report(configuration: ConsoleConfiguration, report: SyncInspectionReport) -> None:
-    """Render an inspection report as Rich tables."""
+    """Render an inspection report as a scannable action list.
+
+    Each action gets its own header line (index, status, description)
+    plus indented sub-lines for its command and message, if present.
+    Unlike a fixed-width table, every line wraps at the console's full
+    width, so long paths and messages stay readable instead of being
+    squeezed into a narrow column.
+    """
     output = configuration.output
+
+    if report.inspection_mode == InspectionMode.FAST:
+        output.warning("Fast inspection: statuses were not probed. 'unknown' means not checked, not confirmed needed.")
 
     for manifest in report.manifests:
         title = str(manifest.manifest_path or '(unknown manifest)')
@@ -74,44 +144,28 @@ def _display_report(configuration: ConsoleConfiguration, report: SyncInspectionR
             field = f'{diagnostic.field}: ' if diagnostic.field else ''
             output.print(f'  [{style}]{diagnostic.severity}[/{style}] {field}{diagnostic.message}')
 
-        table = Table(show_header=True, header_style='bold magenta')
-        table.add_column('#', justify='right', style='dim')
-        table.add_column('Status')
-        table.add_column('Action')
-        table.add_column('Command')
-        table.add_column('Message')
+        if not manifest.actions:
+            output.print('  [muted]No actions[/muted]')
+            continue
 
         for action in manifest.actions:
-            table.add_row(
-                str(action.index + 1),
-                action.status.value,
-                action.action.description,
-                _command_text(action),
-                action.message or '',
+            output.print(
+                f'\n  {action.index + 1}. {_status_text(action.status)}  [bold]{action.action.description}[/bold]'
             )
-
-        if manifest.actions:
-            output.print(table)
-        else:
-            output.print('  [muted]No actions[/muted]')
+            if action.cli_command:
+                output.print(f'     [muted]❯[/muted] [code]{escape(_command_text(action))}[/code]')
+            if action.message:
+                output.print(f'     [detail]{action.message}[/detail]')
 
     for failed in report.failed_paths:
         output.print(f'\n[error]Failed:[/error] {failed.path}')
         output.print(f'  [muted]{failed.error}[/muted]')
 
-    summary = report.summary
     output.blank()
     output.print(
         Panel(
-            (
-                f'{summary.actions} action(s): '
-                f'{summary.needed} needed, '
-                f'{summary.satisfied} satisfied, '
-                f'{summary.update_available} update available, '
-                f'{summary.unavailable} unavailable, '
-                f'{summary.failed} failed'
-            ),
-            border_style='green' if report.success else 'red',
+            _summary_text(report.summary),
+            border_style='success' if report.success else 'error',
         )
     )
 
@@ -147,7 +201,7 @@ def preview_profile(
     *,
     expected_hash: str | None = None,
 ) -> None:
-    """Preview a remote setup profile read-only."""
+    """Preview a remote setup profile without applying it."""
     api = create_api(configuration)
     try:
         inspection = asyncio.run(

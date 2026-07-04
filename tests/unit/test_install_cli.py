@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 
 from porringer.api import API
 from porringer.console.entry import app
-from porringer.schema import DownloadResult
+from porringer.schema import DownloadResult, InspectionMode, SyncInspectionReport
 
 
 def _write_manifest(path: Path, data: dict) -> Path:
@@ -32,8 +32,12 @@ def _fake_inspection() -> SimpleNamespace:
         update_available=0,
         unavailable=0,
         failed=0,
+        skipped=0,
+        unknown=0,
     )
-    report = SimpleNamespace(manifests=[], failed_paths=[], summary=summary, success=True)
+    report = SimpleNamespace(
+        manifests=[], failed_paths=[], summary=summary, success=True, inspection_mode=InspectionMode.COMPLETE
+    )
     profile = SimpleNamespace(name='Test Profile')
     return SimpleNamespace(profile=profile, inspection=report)
 
@@ -52,6 +56,31 @@ class TestInstallCLI:
 
         assert result.exit_code == 1
         assert 'PORRINGER_ASSUME_YES' in result.output
+
+    @staticmethod
+    def test_preview_inspects_in_complete_mode(tmp_path: Path, test_config) -> None:
+        """The confirmation preview probes real presence (COMPLETE inspection).
+
+        The execution parameters default to FAST inspection, which skips
+        all presence/update probing and reports every action as needed.
+        Showing that to a human before the confirmation prompt is
+        misleading — the preview must inspect in COMPLETE mode.
+        """
+        _write_manifest(tmp_path, {'version': '1', 'packages': {'python': ['requests']}})
+        runner = CliRunner()
+
+        with patch(
+            'porringer.backend.command.sync.SyncCommands.inspect',
+            new_callable=AsyncMock,
+            return_value=SyncInspectionReport(),
+        ) as inspect_mock:
+            result = runner.invoke(app, ['install', str(tmp_path)], obj=test_config, input='n\n')
+
+        assert result.exit_code == 0
+        inspect_mock.assert_awaited_once()
+        assert inspect_mock.await_args is not None
+        (params,) = inspect_mock.await_args.args
+        assert params.inspection_mode == InspectionMode.COMPLETE
 
     @staticmethod
     def test_removed_command_hook_option_is_not_advertised(tmp_path: Path, test_config) -> None:

@@ -12,6 +12,7 @@ import typer
 
 from porringer.api import API
 from porringer.console.command import sync as sync_command
+from porringer.console.command.preview import _display_report
 from porringer.console.common import (
     EXIT_FAILURE,
     OnlyActionOption,
@@ -28,7 +29,7 @@ from porringer.console.common import (
     resolve_target_or_exit,
 )
 from porringer.console.schema import ConsoleConfiguration
-from porringer.schema import InspectionMode, InspectionSummary, SyncStrategy
+from porringer.schema import InspectionMode, SyncStrategy
 
 
 @dataclass(slots=True)
@@ -50,17 +51,6 @@ def _confirm_or_abort(configuration: ConsoleConfiguration, yes: bool) -> None:
     confirm_or_abort(configuration, yes=yes, prompt='Apply this setup plan?')
 
 
-def _summary_line(prefix: str, summary: InspectionSummary) -> str:
-    """Format an inspection summary as a single preview line."""
-    return (
-        f'{prefix}: {summary.actions} action(s), '
-        f'{summary.needed} needed, '
-        f'{summary.update_available} update available, '
-        f'{summary.unavailable} unavailable, '
-        f'{summary.failed} failed'
-    )
-
-
 def _run_manifest_install(
     configuration: ConsoleConfiguration,
     api: API,
@@ -79,8 +69,12 @@ def _run_manifest_install(
 
     # JSONL output must stay machine-clean, so the human preview is skipped there.
     if not options.as_jsonl:
-        report = asyncio.run(api.sync.inspect(setup_params))
-        configuration.output.print(_summary_line('Preview', report.summary))
+        # Force COMPLETE inspection for the human preview regardless of what
+        # setup_params carries — a confirmation prompt must show real
+        # presence/update statuses, never FAST's unprobed placeholders.
+        preview_params = setup_params.model_copy(update={'inspection_mode': InspectionMode.COMPLETE})
+        report = asyncio.run(api.sync.inspect(preview_params))
+        _display_report(configuration, report)
 
     _confirm_or_abort(configuration, options.yes)
 
@@ -120,12 +114,11 @@ def _run_profile_install(
     inspection = asyncio.run(
         api.profile.inspect(
             plan.profile_url,
-            inspection_mode=InspectionMode.FAST,
+            inspection_mode=InspectionMode.COMPLETE,
             expected_hash=plan.expected_hash,
         )
     )
-    summary = inspection.inspection.summary
-    configuration.output.print(_summary_line('Profile preview', summary))
+    _display_report(configuration, inspection.inspection)
 
     _confirm_or_abort(configuration, options.yes)
 

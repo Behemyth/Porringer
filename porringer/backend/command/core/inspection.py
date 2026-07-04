@@ -134,8 +134,25 @@ def _installer_available(action: SetupAction, plugins: DiscoveredPlugins) -> boo
     return False
 
 
-def _status_from_result(action: SetupAction, result: SetupActionResult, plugins: DiscoveredPlugins) -> InspectionStatus:
-    """Map an inspected action result to a frontend-oriented status."""
+def _status_from_result(
+    action: SetupAction,
+    result: SetupActionResult,
+    plugins: DiscoveredPlugins,
+    *,
+    checked: bool = True,
+) -> InspectionStatus:
+    """Map an inspected action result to a frontend-oriented status.
+
+    Args:
+        action: The action being classified.
+        result: The inspected (or fast-inspected) result for *action*.
+        plugins: Discovered plugins, used to check installer availability.
+        checked: Whether presence/update probing actually ran. ``False``
+            (FAST inspection) downgrades what would otherwise be
+            :attr:`InspectionStatus.NEEDED` to :attr:`InspectionStatus.UNKNOWN`
+            — FAST never confirms an action is genuinely needed, only that
+            nothing disqualified it up front (unavailable installer, skip).
+    """
     if not _installer_available(action, plugins):
         status = InspectionStatus.UNAVAILABLE
     elif result.skip_reason == SkipReason.NO_PROJECT_DIRECTORY:
@@ -147,6 +164,8 @@ def _status_from_result(action: SetupAction, result: SetupActionResult, plugins:
             status = InspectionStatus.UPDATE_AVAILABLE
         else:
             status = InspectionStatus.SATISFIED
+    elif not checked:
+        status = InspectionStatus.UNKNOWN
     else:
         status = InspectionStatus.NEEDED
     return status
@@ -224,6 +243,7 @@ def _inspection_from_result(
 ) -> ActionInspection:
     """Create an action inspection record from an inspected result."""
     cli_command = get_cli_command(action, plugins, parameters.strategy)
+    checked = parameters.inspection_mode != InspectionMode.FAST
     return ActionInspection(
         index=index,
         ref=ref,
@@ -231,7 +251,7 @@ def _inspection_from_result(
         manifest_index=ref.manifest_index,
         action_index=ref.action_index,
         action=action_snapshot(action, index, ref=ref),
-        status=_status_from_result(action, result, plugins),
+        status=_status_from_result(action, result, plugins, checked=checked),
         cli_command=cli_command,
         success=result.success,
         skipped=result.skipped,
@@ -337,6 +357,7 @@ def inspection_summary(
         unavailable=sum(1 for action in actions if action.status == InspectionStatus.UNAVAILABLE),
         failed=sum(1 for action in actions if action.status == InspectionStatus.FAILED),
         skipped=sum(1 for action in actions if action.status == InspectionStatus.SKIPPED),
+        unknown=sum(1 for action in actions if action.status == InspectionStatus.UNKNOWN),
     )
 
 
