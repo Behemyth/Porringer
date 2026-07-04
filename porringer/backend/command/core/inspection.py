@@ -149,9 +149,10 @@ def _status_from_result(
         plugins: Discovered plugins, used to check installer availability.
         checked: Whether presence/update probing actually ran. ``False``
             (FAST inspection) downgrades what would otherwise be
-            :attr:`InspectionStatus.NEEDED` to :attr:`InspectionStatus.UNKNOWN`
-            — FAST never confirms an action is genuinely needed, only that
-            nothing disqualified it up front (unavailable installer, skip).
+            :attr:`InspectionStatus.NEEDED` to :attr:`InspectionStatus.UNKNOWN`.
+            FAST never confirms an action is genuinely needed. It only
+            confirms that nothing disqualified it up front (unavailable
+            installer, skip).
     """
     if not _installer_available(action, plugins):
         status = InspectionStatus.UNAVAILABLE

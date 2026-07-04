@@ -60,9 +60,9 @@ def _running_in_isolated_app_venv() -> bool:
 
     ``pipx install porringer`` places porringer in its own dedicated
     virtual environment and writes a ``pipx_metadata.json`` marker into
-    the venv prefix.  When that is the case ``sys.executable`` points at
+    the venv prefix.  When that is the case, ``sys.executable`` points at
     porringer's private interpreter, which has none of the user's
-    packages/tools — so package presence detection and generated install
+    packages or tools.  Package presence detection and generated install
     commands must target the user's default interpreter instead.
     """
     return (Path(sys.prefix) / 'pipx_metadata.json').is_file()
@@ -212,9 +212,9 @@ class PythonEnvironment(Environment, RuntimeConsumer):
             _logger.debug('python_command: no runtime_context supplied, falling back to default interpreter')
 
         # When porringer runs from a frozen binary or an isolated pipx
-        # venv, sys.executable is not the user's interpreter — prefer a
-        # real Python found on PATH.  In the normal case this simply
-        # returns sys.executable.
+        # venv, sys.executable is not the user's interpreter.  Prefer a
+        # real Python found on PATH instead.  In the normal case this
+        # simply returns sys.executable.
         resolved = _default_python()
         _logger.debug('python_command: using default interpreter %s', resolved)
         return resolved

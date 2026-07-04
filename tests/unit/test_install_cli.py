@@ -59,12 +59,13 @@ class TestInstallCLI:
 
     @staticmethod
     def test_preview_inspects_in_complete_mode(tmp_path: Path, test_config) -> None:
-        """The confirmation preview probes real presence (COMPLETE inspection).
+        """The confirmation preview always probes real presence (COMPLETE inspection).
 
-        The execution parameters default to FAST inspection, which skips
-        all presence/update probing and reports every action as needed.
-        Showing that to a human before the confirmation prompt is
-        misleading — the preview must inspect in COMPLETE mode.
+        Showing a human an unprobed FAST report before the confirmation
+        prompt would be misleading, since FAST reports every action as
+        unknown rather than checking whether it is actually needed. The
+        preview must inspect in COMPLETE mode regardless of what the
+        execution parameters carry.
         """
         _write_manifest(tmp_path, {'version': '1', 'packages': {'python': ['requests']}})
         runner = CliRunner()

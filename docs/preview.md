@@ -42,7 +42,7 @@ Use complete mode for final diagnostics. Use fast mode for live refresh loops wh
 
 Fast reports and complete reports share the same JSON shape. A client can render fast previews during editing, then run complete preview when the user asks for evidence or is about to execute.
 
-Fast mode never probes presence, so it cannot tell "needed" apart from "not checked". Actions that would be `needed` under complete inspection instead report `unknown` — treat `unknown` as "not yet known", not as "run this". Never present a fast report as the basis for a confirmation prompt; always run `complete` inspection immediately before asking a human (or executing) to act.
+Fast mode never probes presence, so it cannot tell "needed" apart from "not checked". Actions that would be `needed` under complete inspection instead report `unknown`. Treat `unknown` as "not yet known", not as "run this". Never present a fast report as the basis for a confirmation prompt; always run `complete` inspection immediately before asking a human (or executing) to act.
 
 ## JSON Output
 

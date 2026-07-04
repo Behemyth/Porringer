@@ -66,8 +66,8 @@ def _command_text(action: ActionInspection) -> str:
 
     Shortens the leading token to its executable basename, so a full
     interpreter path like ``C:\...\Scripts\python.exe`` becomes
-    ``python.exe``. This keeps long absolute paths from wrapping across
-    lines in the table. Plain command names (``git``, ``pdm``) pass
+    ``python.exe``. This keeps long interpreter paths from crowding out
+    the rest of the command. Plain command names (``git``, ``pdm``) pass
     through unchanged.
     """
     if not action.cli_command:
@@ -76,7 +76,7 @@ def _command_text(action: ActionInspection) -> str:
     return ' '.join((Path(head).name, *rest))
 
 
-# Glyph shown before each status label in the preview table. Colour comes
+# Glyph shown before each status label in the preview list. Colour comes
 # from the matching ``status.<value>`` style in PORRINGER_THEME, so both
 # live in one place: output.py owns colour, this dict owns the glyph.
 _STATUS_GLYPHS: dict[InspectionStatus, str] = {

@@ -37,7 +37,7 @@ PORRINGER_THEME = Theme(
         # bold action description, while still reading as visually
         # distinct text (not just "normal" prose) at a glance.
         'code': 'underline dim',
-        # Per-InspectionStatus styles for action tables (preview/install).
+        # Per-InspectionStatus styles for the preview/install action list.
         # Keyed by InspectionStatus.value so renderers can look them up directly.
         'status.satisfied': 'green',
         'status.needed': 'yellow',

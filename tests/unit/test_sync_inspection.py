@@ -137,7 +137,7 @@ class TestSyncInspection:
         assert report.inspection_mode == InspectionMode.FAST
         assert report.summary.actions == 1
         # FAST never probes presence, so a would-be NEEDED action reports
-        # UNKNOWN instead — NEEDED must only mean 'checked and confirmed absent'.
+        # UNKNOWN instead. NEEDED must only mean 'checked and confirmed absent'.
         assert report.manifests[0].actions[0].status == InspectionStatus.UNKNOWN
         assert report.manifests[0].actions[0].installed_version is None
 
@@ -215,7 +215,7 @@ def test_preview_cli_explain(tmp_path: Path, test_config) -> None:
     """``porringer preview --explain`` renders diagnostics for a fast inspection.
 
     FAST reports UNKNOWN (not NEEDED), so it produces no 'Run action'
-    follow-up — explain output is just the summary line.
+    follow-up. The explain output is just the summary line.
     """
     _write_manifest(tmp_path, {'version': '1', 'packages': {'python': ['requests']}})
     runner = CliRunner()

@@ -70,7 +70,7 @@ def _run_manifest_install(
     # JSONL output must stay machine-clean, so the human preview is skipped there.
     if not options.as_jsonl:
         # Force COMPLETE inspection for the human preview regardless of what
-        # setup_params carries — a confirmation prompt must show real
+        # setup_params carries. A confirmation prompt must show real
         # presence/update statuses, never FAST's unprobed placeholders.
         preview_params = setup_params.model_copy(update={'inspection_mode': InspectionMode.COMPLETE})
         report = asyncio.run(api.sync.inspect(preview_params))

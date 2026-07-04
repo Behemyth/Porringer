@@ -29,7 +29,7 @@ class InspectionStatus(StrEnum):
     FAILED = 'failed'
     SKIPPED = 'skipped'
     UNKNOWN = 'unknown'
-    """Presence/update was never probed (``InspectionMode.FAST``) — distinct
+    """Presence/update was never probed (``InspectionMode.FAST``). Distinct
     from :attr:`NEEDED`, which means presence was checked and the action is
     genuinely absent. Never rely on ``UNKNOWN`` implying an action should run.
     """
