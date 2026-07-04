@@ -73,7 +73,8 @@ def _run_manifest_install(
         # setup_params carries. A confirmation prompt must show real
         # presence/update statuses, never FAST's unprobed placeholders.
         preview_params = setup_params.model_copy(update={'inspection_mode': InspectionMode.COMPLETE})
-        report = asyncio.run(api.sync.inspect(preview_params))
+        with configuration.output.status('Inspecting...'):
+            report = asyncio.run(api.sync.inspect(preview_params))
         _display_report(configuration, report)
 
     _confirm_or_abort(configuration, options.yes)
@@ -111,13 +112,14 @@ def _run_profile_install(
         configuration.output.error('Install link target is missing profile URL')
         raise typer.Exit(EXIT_FAILURE)
 
-    inspection = asyncio.run(
-        api.profile.inspect(
-            plan.profile_url,
-            inspection_mode=InspectionMode.COMPLETE,
-            expected_hash=plan.expected_hash,
+    with configuration.output.status('Inspecting...'):
+        inspection = asyncio.run(
+            api.profile.inspect(
+                plan.profile_url,
+                inspection_mode=InspectionMode.COMPLETE,
+                expected_hash=plan.expected_hash,
+            )
         )
-    )
     _display_report(configuration, inspection.inspection)
 
     _confirm_or_abort(configuration, options.yes)

@@ -15,11 +15,17 @@ commands no longer embed ad-hoc colour markup such as ``[red]Error:[/red]``.
 
 from __future__ import annotations
 
+import contextlib
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rich.console import Console
 from rich.theme import Theme
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from rich.status import Status
 
 # Named semantic styles shared by every CLI command. Keeping the colour
 # choices here means the whole CLI can be restyled in one place.
@@ -108,6 +114,22 @@ class Output:
         """Print a blank line to stdout (suppressed when quiet)."""
         if not self.quiet:
             self.console.print()
+
+    @contextlib.contextmanager
+    def status(self, message: str) -> Iterator[Status | None]:
+        """Show an indeterminate spinner with *message* while a block runs.
+
+        Use this for a single opaque async call with no incremental
+        progress to report (e.g. manifest inspection), as opposed to
+        :class:`rich.progress.Progress`, which needs per-item events to
+        drive a percentage. Suppressed when quiet, matching the other
+        informational helpers.
+        """
+        if self.quiet:
+            yield None
+            return
+        with self.console.status(message) as status:
+            yield status
 
     def success(self, message: str, *, prefix: str | None = None) -> None:
         """Report a successful outcome to stdout (suppressed when quiet)."""
