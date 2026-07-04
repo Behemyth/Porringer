@@ -22,7 +22,7 @@ A CLI and Python API for synchronizing developer environments from a declarative
 - Read-only previews with stable action IDs, command previews, diagnostics, and JSON output.
 - Sync strategies for minimal installs or latest allowed versions.
 - JSONL progress streams, replay records, and trace artifacts for downstream clients.
-- Python APIs for inspection, execution, profiles, tools, progress events, and client snapshots.
+- Python APIs for inspection, execution, profiles, tools, and progress events.
 
 ## Quick Start
 

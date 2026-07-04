@@ -90,7 +90,6 @@ from porringer.schema.progress import (
     SetupActionResultSnapshot,
     progress_event_snapshot,
 )
-from porringer.schema.snapshot import ClientSnapshot
 from porringer.schema.tool import ManagedPackageResult, ManagedToolReport
 from porringer.utility.exception import ManifestValidationCode
 
@@ -175,7 +174,6 @@ __all__ = [
     'SyncInspectionReport',
     'SyncRunReport',
     'SyncStrategy',
-    'ClientSnapshot',
     'Uninstall',
     'Upgrade',
     'action_id_for',

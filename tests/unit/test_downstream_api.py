@@ -265,19 +265,6 @@ class TestProfileCommands:
 
 
 @pytest.mark.mock_packages
-class TestClientSnapshot:
-    """Aggregate client snapshot tests."""
-
-    @staticmethod
-    async def test_snapshot_includes_plugins(test_api: API) -> None:
-        """client.snapshot returns plugin state for downstream clients."""
-        snapshot = await test_api.client.snapshot()
-
-        assert snapshot.inspection_mode == InspectionMode.FAST
-        assert snapshot.plugins
-
-
-@pytest.mark.mock_packages
 class TestInspectPaths:
     """Stateless multi-directory inspection for GUI clients."""
 

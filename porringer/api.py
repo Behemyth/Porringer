@@ -7,7 +7,6 @@ import asyncio
 import logging
 
 from porringer.backend.builder import Builder
-from porringer.backend.command.client import ClientCommands
 from porringer.backend.command.core.discovery import DiscoveredPlugins, discover_all_plugins
 from porringer.backend.command.package import PackageCommands
 from porringer.backend.command.plugin import PluginCommands
@@ -63,7 +62,6 @@ class API:
         self.sync = SyncCommands()
         self.tool = ToolCommands(self.sync)
         self.profile = ProfileCommands(self.sync)
-        self.client = ClientCommands(self.tool)
 
     # Discover plugins and resolve runtime information.
 

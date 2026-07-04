@@ -55,7 +55,6 @@ asyncio.run(main())
 | `api.extension` | List, install, upgrade, and uninstall Porringer extension packages. |
 | `api.tool` | Check, upgrade, or uninstall packages and tools for the current project. |
 | `api.profile` | Resolve, inspect, and run HTTPS setup profiles. |
-| `api.client` | Build aggregate snapshots for long-lived clients. |
 
 Long-lived clients should discover plugins once and pass the result into repeated calls:
 
@@ -75,9 +74,8 @@ async def main() -> None:
         SetupParameters(paths=Path('.'), inspection_mode=InspectionMode.FAST),
         plugins=plugins,
     )
-    snapshot = await api.client.snapshot(plugins=plugins)
 
-    print(report.status, len(snapshot.plugins))
+    print(report.status, report.summary.actions)
 
 
 asyncio.run(main())

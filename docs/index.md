@@ -16,7 +16,7 @@ Use Porringer when you want one repeatable entry point for setup while still rel
 - Read-only previews with stable action IDs, native command previews, diagnostics, and JSON output.
 - Sync strategies for minimal installs or latest allowed versions.
 - Download and profile flows with HTTPS and hash verification.
-- Python APIs for inspection, execution, profiles, tools, progress events, and client snapshots.
+- Python APIs for inspection, execution, profiles, tools, and progress events.
 
 ## Commands
 

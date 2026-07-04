@@ -279,11 +279,6 @@ fast_report = await api.sync.inspect(
     plugins=plugins,
 )
 
-snapshot = await api.client.snapshot(
-    inspection_mode=InspectionMode.FAST,
-    plugins=plugins,
-)
-
 await API.resolve_runtime_context(plugins)
 complete_report = await api.sync.inspect(SetupParameters(paths=project_path), plugins=plugins)
 
@@ -349,6 +344,5 @@ Porringer owns reusable backend contracts for CLIs, GUIs, and agents:
 - `SetupParameters.action_ids` for stable action selectors.
 - `api.tool.check_updates(...)` and `api.tool.upgrade_project(...)` for managed package and tool operations.
 - `api.profile.resolve(...)`, `api.profile.inspect(...)`, and `api.profile.run(...)` for portable HTTPS setup profiles.
-- `api.client.snapshot(...)` for low-latency plugin and managed-tool update state.
 
 Downstream applications should own application-specific behavior such as saved profile lists, tray menus, URI confirmation, update schedules, sorting, and display labels.

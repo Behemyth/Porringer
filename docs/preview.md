@@ -90,7 +90,7 @@ Follow-up actions are safe affordances for humans and machines. They carry a lab
 
 ## Envelopes and Explanation
 
-`--envelope` wraps the inspection report in a `ResultEnvelope` with a correlation ID, timestamps, summary, diagnostics, follow-up actions, and the raw report payload. Use it when a caller wants one consistent final-result shape across inspect, sync, project, tool, profile, and client snapshot operations.
+`--envelope` wraps the inspection report in a `ResultEnvelope` with a correlation ID, timestamps, summary, diagnostics, follow-up actions, and the raw report payload. Use it when a caller wants one consistent final-result shape across inspect, sync, project, tool, and profile operations.
 
 `--explain` renders the same structured diagnostics and follow-up actions as a short human explanation.
 
