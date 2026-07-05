@@ -22,10 +22,6 @@ import aiohttp
 from porringer.backend.backend import BackendResolver
 from porringer.core.path import ensure_system_path, reset_sync_state
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
-from porringer.core.plugin_schema.plugin_manager import (
-    PluginManager,
-    find_plugin_manager,
-)
 from porringer.core.plugin_schema.project_environment import (
     ProjectInstaller,
 )
@@ -656,18 +652,6 @@ async def execute_package(
         logger.info("Skipping '%s': %s", action.package, resolved.message)
         return resolved_to_result(resolved)
 
-    # --- Plugin-management actions ----------------------------------------
-    if action.plugin_target is not None:
-        result = await _attempt_plugin_operation(
-            action,
-            operation=resolved.operation,
-            event_queue=event_queue,
-            plugin_manager=resolved.plugin_manager,
-            project_environments=ctx.project_environments,
-        )
-        forward_version_metadata(result, resolved.operation)
-        return result
-
     # --- Normal package actions -------------------------------------------
     if action.installer not in environments:
         msg = f"Installer '{action.installer}' is not available"
@@ -726,70 +710,6 @@ async def _attempt_package_operation(
         ),
         event_queue=event_queue,
         runtime_context=runtime_context,
-    )
-
-
-async def _attempt_plugin_operation(
-    action: SetupAction,
-    *,
-    operation: Operation,
-    event_queue: asyncio.Queue[ProgressEvent | None],
-    plugin_manager: PluginManager | None = None,
-    project_environments: dict[str, ProjectInstaller] | None = None,
-) -> SetupActionResult:
-    """Install, upgrade, or uninstall an extension package via its native ``PluginManager``.
-
-    Uses the *plugin_manager* resolved during operation resolution
-    when available, falling back to a fresh lookup when not provided.
-
-    Args:
-        action: The plugin action (``plugin_target`` must be set).
-        operation: The resolved operation (Install, Upgrade, or
-            Uninstall).
-        event_queue: Queue to emit action progress events into.
-        plugin_manager: Pre-resolved ``PluginManager`` from
-            :func:`resolve_operation`, if available.
-        project_environments: Dict of project-environment plugins,
-            used as fallback when *plugin_manager* is ``None``.
-
-    Returns:
-        The result of the attempt.
-    """
-    assert action.plugin_target is not None
-    assert action.package is not None
-
-    if plugin_manager is None:
-        plugin_manager = find_plugin_manager(action.plugin_target.name, project_environments)
-    if plugin_manager is None:
-        msg = f"No PluginManager found for '{action.plugin_target.name}'"
-        return SetupActionResult(action=action, success=False, message=msg)
-
-    match operation:
-        case Install():
-            execute = plugin_manager.plugin_install
-            verb, verb_past, suffix = 'install plugin', 'Installed', f' to {action.plugin_target.name} (native)'
-        case Upgrade():
-            execute = plugin_manager.plugin_upgrade
-            verb, verb_past, suffix = 'upgrade plugin', 'Upgraded', f' to {action.plugin_target.name} (native)'
-        case _:
-            msg = f'Unexpected operation {operation} for plugin action'
-            return SetupActionResult(action=action, success=False, message=msg)
-
-    logger.info(
-        "Using native plugin management (%s) for '%s' via %s",
-        verb,
-        action.plugin_target.name,
-        type(plugin_manager).__name__,
-    )
-    return await _attempt_operation(
-        action,
-        spec=OperationSpec(
-            execute=execute,
-            verb=verb,
-            verb_past=verb_past,
-            success_suffix=suffix,
-        ),
-        event_queue=event_queue,
     )
 
 
@@ -989,8 +909,6 @@ async def _run_sequential_packages(
         # action sees fresh state for the same installer.
         if result.success and not result.skipped and package_cache is not None and action.installer:
             package_cache.invalidate_packages(action.installer, ctx.project_path)
-            if action.plugin_target is not None:
-                package_cache.invalidate_plugins(action.plugin_target.name)
         _emit_completed(action, result, ref, event_queue)
         if not result.success and not result.skipped and parameters.fail_fast:
             logger.error(f'Action failed: {action.description} - {result.message}')
@@ -1423,7 +1341,6 @@ def resolve_deferred_actions(
                 verb,
                 installer,
                 package=action.package,
-                plugin_target=action.plugin_target,
             )
             actions[idx] = replace(action, installer=installer, description=new_description)
             logger.info('Deferred action resolved: %s -> %s', new_description, installer)

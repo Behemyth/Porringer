@@ -26,7 +26,6 @@ from typing import cast
 from porringer.backend.builder import Builder, PluginInformation
 from porringer.core.plugin_schema.environment import Environment
 from porringer.core.plugin_schema.manifest import ManifestContributor
-from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext, RuntimeProvider
 from porringer.core.plugin_schema.scm import ScmEnvironment
@@ -142,7 +141,6 @@ class DiscoveredPlugins:
 
     _CAPABILITY_MAP: tuple[tuple[type, PluginCapability], ...] = (
         (RuntimeConsumer, PluginCapability.RUNTIME_CONSUMER),
-        (PluginManager, PluginCapability.PLUGIN_MANAGER),
         (ManifestContributor, PluginCapability.MANIFEST_CONTRIBUTOR),
         (RuntimeProvider, PluginCapability.RUNTIME_PROVIDER),
     )
@@ -151,8 +149,8 @@ class DiscoveredPlugins:
         """Return the set of capabilities implemented by *plugin_name*.
 
         Probes the instantiated plugin object for each known protocol
-        mixin (``RuntimeConsumer``, ``PluginManager``,
-        ``ManifestContributor``, ``RuntimeProvider``) via ``isinstance``.
+        mixin (``RuntimeConsumer``, ``ManifestContributor``,
+        ``RuntimeProvider``) via ``isinstance``.
 
         Args:
             plugin_name: Canonical plugin name to inspect.

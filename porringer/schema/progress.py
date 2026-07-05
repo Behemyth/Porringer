@@ -197,7 +197,6 @@ def _snapshot_action(action: SetupAction, action_ref: ActionRef | None, action_i
         package=package,
         package_name=action.package.name if action.package is not None else None,
         package_constraint=action.package.constraint if action.package is not None else None,
-        plugin_target=str(action.plugin_target) if action.plugin_target is not None else None,
         package_description=action.package_description,
         include_prereleases=action.include_prereleases,
         runtime_tag=action.runtime_tag,

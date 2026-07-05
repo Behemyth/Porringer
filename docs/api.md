@@ -112,7 +112,6 @@ Plugin authors should build on `porringer.core.plugin_schema` and `porringer.cor
 | `ScmEnvironment` | Source-control plugins such as `git`. |
 | `RuntimeProvider` | Plugins that discover or install language runtimes. |
 | `RuntimeConsumer` | Plugins that can target a resolved runtime executable. |
-| `PluginManager` | Plugins that install and upgrade extension packages through a host tool. |
 | `ToolBasedPlugin` | Shared base for plugins driven by command-line tools. |
 
 ```python

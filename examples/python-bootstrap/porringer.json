@@ -10,25 +10,11 @@
             "3.14"
         ]
     },
-    "packages": {
-        "python": [
-            {
-                "name": "pipx",
-                "description": "Install and run Python applications in isolated environments"
-            }
-        ]
-    },
     "tools": {
         "python": [
             {
                 "name": "pdm",
-                "description": "Python package and dependency manager",
-                "plugins": [
-                    {
-                        "name": "cppython",
-                        "include_prereleases": true
-                    }
-                ]
+                "description": "Python package and dependency manager"
             }
         ]
     },

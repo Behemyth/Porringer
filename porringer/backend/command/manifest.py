@@ -126,6 +126,42 @@ def manifest_filenames() -> tuple[str, ...]:
 # ---------------------------------------------------------------------------
 
 
+def _check_removed_plugins_field(data: dict, source_path: Path) -> None:
+    """Reject manifests that still use the removed ``plugins`` field.
+
+    Porringer no longer supports native plugin-management entries
+    (e.g. ``{"name": "pdm", "plugins": ["cppython"]}``).  Raising a
+    targeted error here — before Pydantic's generic ``extra='forbid'``
+    rejection — gives users clear migration guidance instead of an
+    opaque schema error.
+
+    Args:
+        data: The raw manifest dict (already extracted from any host
+            config section), prior to ``SetupManifest`` validation.
+        source_path: Original file path, for the error message.
+
+    Raises:
+        ManifestError: When any package/tool/runtime entry declares a
+            ``plugins`` key.
+    """
+    for section_name in ('packages', 'tools', 'runtimes'):
+        section = data.get(section_name)
+        if not isinstance(section, dict):
+            continue
+        for entries in section.values():
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if isinstance(entry, dict) and 'plugins' in entry:
+                    raise ManifestError(
+                        f"'{section_name}' entry '{entry.get('name', '?')}' in {source_path} uses the removed "
+                        "'plugins' field. Native plugin management was removed — declare the sub-package "
+                        "directly in the target project's own configuration instead "
+                        '(e.g. cppython via [build-system].requires in pyproject.toml).',
+                        code=ManifestValidationCode.REMOVED_FIELD,
+                    )
+
+
 def _load_native_manifest(path: Path) -> SetupManifest:
     """Load a native ``porringer.json`` file.
 
@@ -141,6 +177,7 @@ def _load_native_manifest(path: Path) -> SetupManifest:
     try:
         with open(path, encoding='utf-8') as f:
             data = json.load(f)
+        _check_removed_plugins_field(data, path)
         return SetupManifest.model_validate(data)
     except json.JSONDecodeError as e:
         raise ManifestError(
@@ -152,6 +189,8 @@ def _load_native_manifest(path: Path) -> SetupManifest:
             f'Schema validation failed for manifest {path}: {e}',
             code=ManifestValidationCode.SCHEMA_INVALID,
         ) from e
+    except ManifestError:
+        raise
     except Exception as e:
         raise ManifestError(
             f'Failed to load manifest {path}: {e}',
@@ -270,12 +309,15 @@ def _load_embedded_manifest(
 
     # Inline mode: the section *is* the manifest
     try:
+        _check_removed_plugins_field(section, path)
         manifest = SetupManifest.model_validate(section)
     except ValidationError as e:
         raise ManifestError(
             f'Schema validation failed for manifest in {path}: {e}',
             code=ManifestValidationCode.SCHEMA_INVALID,
         ) from e
+    except ManifestError:
+        raise
     except Exception as e:
         raise ManifestError(
             f'Invalid manifest in {path}: {e}',
@@ -605,7 +647,7 @@ def manifest_schema() -> dict:
 
     * Root ``$schema`` and ``$id`` meta-fields are present.
     * A ``$schema`` property is exposed so editors can auto-detect the schema.
-    * ``PackageRef``, ``PackageSpec``, and ``PluginSpec`` definitions accept
+    * ``PackageRef`` and ``PackageSpec`` definitions accept
       both the **string shorthand** and the full **object form** via ``anyOf``.
 
     Returns:
@@ -634,7 +676,7 @@ def manifest_schema() -> dict:
 def _patch_string_shorthand(schema: dict) -> None:
     """Wrap ``$defs`` entries that accept string shorthand in ``anyOf``.
 
-    Models like ``PackageRef``, ``PackageSpec``, and ``PluginSpec`` use a
+    Models like ``PackageRef`` and ``PackageSpec`` use a
     Pydantic ``model_validator(mode='before')`` to coerce plain strings
     into their object form at runtime.  JSON Schema has no way to express
     that automatically, so we patch the generated ``$defs`` to use
@@ -645,7 +687,6 @@ def _patch_string_shorthand(schema: dict) -> None:
     _targets = {
         'PackageRef': 'Package specifier string (e.g. "requests", "ruff>=0.8.0", "@biomejs/biome@^1.0")',
         'PackageSpec': 'Package specifier string (e.g. "pytest", "ruff>=0.8.0")',
-        'PluginSpec': 'Plugin specifier string (e.g. "cppython")',
     }
 
     for name, string_description in _targets.items():

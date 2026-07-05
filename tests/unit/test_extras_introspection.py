@@ -5,8 +5,7 @@ Tests for extras introspection utilities in resolution.py.
 Verifies that ``extras_satisfied()`` correctly evaluates PEP 508
 conditional dependencies, that ``check_extras_installed()``
 combines subprocess metadata collection with host-side evaluation,
-and that the plugin-environment helpers (``find_tool_python``,
-``fetch_plugin_extras_context``) work correctly.
+and that ``find_tool_python`` works correctly.
 """
 
 import json
@@ -21,9 +20,8 @@ from packaging.utils import canonicalize_name
 from porringer.backend.command.core.resolution import (
     check_extras_installed,
     extras_satisfied,
-    fetch_plugin_extras_context,
 )
-from porringer.core.plugin_schema.plugin_manager import find_tool_python
+from porringer.core.plugin_schema.tool_based import find_tool_python
 
 # ---------------------------------------------------------------------------
 # Sample Requires-Dist data (matches real-world patterns)
@@ -307,62 +305,4 @@ class TestFindToolPython:
 
         with patch('shutil.which', return_value=str(fake_exe)):
             result = find_tool_python('tool')
-        assert result is None
-
-
-# ---------------------------------------------------------------------------
-# fetch_plugin_extras_context
-# ---------------------------------------------------------------------------
-
-
-class TestFetchPluginExtrasContext:
-    """Tests for the combined requires + installed names subprocess."""
-
-    @staticmethod
-    async def test_success() -> None:
-        """Successful subprocess → (requires, installed_names)."""
-        payload = json.dumps({
-            'requires': ['dep-a>=1', 'dep-b ; extra == "x"'],
-            'installed': ['dep-a', 'dep-b', 'My-Package'],
-        }).encode()
-
-        mock_proc = AsyncMock()
-        mock_proc.returncode = 0
-        mock_proc.communicate = AsyncMock(return_value=(payload, b''))
-
-        with patch('asyncio.create_subprocess_exec', return_value=mock_proc):
-            result = await fetch_plugin_extras_context('python', 'my-package')
-
-        assert result is not None
-        requires, installed = result
-        assert requires == ['dep-a>=1', 'dep-b ; extra == "x"']
-        assert 'my-package' in installed  # canonicalised
-        assert 'dep-a' in installed
-
-    @staticmethod
-    async def test_subprocess_failure() -> None:
-        """Non-zero exit → None."""
-        mock_proc = AsyncMock()
-        mock_proc.returncode = 1
-        mock_proc.communicate = AsyncMock(return_value=(b'', b'err'))
-
-        with patch('asyncio.create_subprocess_exec', return_value=mock_proc):
-            result = await fetch_plugin_extras_context('python', 'missing')
-        assert result is None
-
-    @staticmethod
-    async def test_file_not_found() -> None:
-        """Python not found → None."""
-        with patch('asyncio.create_subprocess_exec', side_effect=FileNotFoundError):
-            result = await fetch_plugin_extras_context('/no/python', 'pkg')
-        assert result is None
-
-    @staticmethod
-    async def test_timeout() -> None:
-        """Subprocess timeout → None."""
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(side_effect=TimeoutError)
-
-        with patch('asyncio.create_subprocess_exec', return_value=mock_proc):
-            result = await fetch_plugin_extras_context('python', 'pkg')
         assert result is None

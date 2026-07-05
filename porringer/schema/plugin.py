@@ -22,9 +22,6 @@ class PluginCapability(Enum):
     RUNTIME_CONSUMER = auto()
     """Plugin consumes a resolved runtime executable (e.g. pip, uv)."""
 
-    PLUGIN_MANAGER = auto()
-    """Plugin manages its own sub-plugins natively (e.g. pdm, poetry)."""
-
     MANIFEST_CONTRIBUTOR = auto()
     """Plugin contributes a manifest source file (e.g. pyproject.toml)."""
 

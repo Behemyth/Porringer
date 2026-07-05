@@ -70,32 +70,18 @@ Manifest entries are grouped by kind, then by ecosystem. Ecosystem names are dec
 
 Project install is implicit. Project-install plugins inspect the repository for marker files, lock files, and tool-specific configuration. Porringer then chooses one project-install owner per ecosystem.
 
-## Package Plugins
+## Inference
 
-Any entry in `packages`, `tools`, `runtimes`, or `scm` can include a `plugins` array. Use it when the installed tool has its own plugin mechanism. For example, this installs `pdm` and then runs PDM's native plugin install flow for `cppython`:
+Several manifest sections are optional because Porringer infers them from repository metadata and conventions. An explicit manifest entry always overrides the inferred value.
 
-```json
-{
-  "tools": {
-    "python": [
-      { "name": "pdm", "plugins": ["cppython"] }
-    ]
-  }
-}
-```
+| Inferred | From | Notes |
+| --- | --- | --- |
+| Tool bootstrap (e.g. `pipx`) | The tool plugin itself | Synthesized only when the resolved tool installer is unavailable; declaring it via `packages` is never required. |
+| Project's own tool (e.g. `pdm`) | Project evidence (lock files, `[tool.*]` tables) | Synthesized only when the tool's CLI isn't already available; an explicit `tools` entry pins a version instead. |
+| SCM clone | `url`, when it points at a repo page on a known forge | A homepage or docs URL is never mistaken for a repository; declaring `scm` explicitly always wins. |
+| Runtime version | `requires-python` in an already-local `pyproject.toml` | Only applies once the project exists on disk; a manifest that clones the project first should still declare `runtimes` explicitly. |
 
-The full object form is also supported:
-
-```json
-{
-  "name": "pdm",
-  "plugins": [
-    { "name": "cppython", "include_prereleases": true }
-  ]
-}
-```
-
-The field is handled by plugins that implement `PluginManager`, such as `pdm` and `pipx`.
+Preview always shows the full inferred plan, including any synthesized steps, so the manifest stays terse while the plan output stays transparent.
 
 ## Sync Strategies
 

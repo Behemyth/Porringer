@@ -28,10 +28,6 @@ from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters, Environment
-from porringer.core.plugin_schema.plugin_manager import (
-    PluginManager,
-    find_plugin_manager,
-)
 from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
@@ -65,22 +61,15 @@ class ResolvedOperation:
     action: SetupAction
     operation: Operation
     message: str | None = None
-    plugin_manager: PluginManager | None = None
-    """The resolved ``PluginManager`` for plugin-target actions, or
-    ``None`` for normal package actions.  Cached here so the caller
-    does not need to look it up again."""
 
 
 @dataclass(frozen=True, slots=True)
 class PackageCacheStats:
-    """Counters for package/plugin presence cache behavior."""
+    """Counters for package presence cache behavior."""
 
     package_hits: int = 0
     package_misses: int = 0
-    plugin_hits: int = 0
-    plugin_misses: int = 0
     package_invalidations: int = 0
-    plugin_invalidations: int = 0
 
 
 def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
@@ -126,11 +115,10 @@ def resolved_to_result(resolved: ResolvedOperation) -> SetupActionResult:
 
 
 class PackageCache:
-    """Per-phase cache for ``packages()`` / ``installed_plugins()`` results.
+    """Per-phase cache for ``packages()`` results.
 
-    Ensures each environment plugin's ``packages()`` method and each
-    ``PluginManager``'s ``installed_plugins()`` method is called at
-    most once per unique key, eliminating redundant subprocess or
+    Ensures each environment plugin's ``packages()`` method is called
+    at most once per unique key, eliminating redundant subprocess or
     filesystem queries when many actions share the same installer.
 
     Thread-safe via per-key `asyncio.Lock` instances so concurrent
@@ -141,24 +129,17 @@ class PackageCache:
     def __init__(self) -> None:
         """Initialise empty caches and lock registry."""
         self._packages: dict[str, list[Package]] = {}
-        self._plugins: dict[str, list[Package]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._package_hits = 0
         self._package_misses = 0
-        self._plugin_hits = 0
-        self._plugin_misses = 0
         self._package_invalidations = 0
-        self._plugin_invalidations = 0
 
     def stats(self) -> PackageCacheStats:
-        """Return a snapshot of package/plugin cache counters."""
+        """Return a snapshot of package cache counters."""
         return PackageCacheStats(
             package_hits=self._package_hits,
             package_misses=self._package_misses,
-            plugin_hits=self._plugin_hits,
-            plugin_misses=self._plugin_misses,
             package_invalidations=self._package_invalidations,
-            plugin_invalidations=self._plugin_invalidations,
         )
 
     def log_debug_stats(self, label: str) -> None:
@@ -167,15 +148,11 @@ class PackageCache:
             return
         stats = self.stats()
         logger.debug(
-            '%s PackageCache stats: package_hits=%d package_misses=%d '
-            'plugin_hits=%d plugin_misses=%d package_invalidations=%d plugin_invalidations=%d',
+            '%s PackageCache stats: package_hits=%d package_misses=%d package_invalidations=%d',
             label,
             stats.package_hits,
             stats.package_misses,
-            stats.plugin_hits,
-            stats.plugin_misses,
             stats.package_invalidations,
-            stats.plugin_invalidations,
         )
 
     def _lock_for(self, key: str) -> asyncio.Lock:
@@ -213,30 +190,6 @@ class PackageCache:
             self._packages[key] = await environment.packages(project_path=project_path, runtime_context=runtime_context)
             return self._packages[key]
 
-    async def get_plugins(
-        self,
-        tool_name: str,
-        manager: PluginManager,
-    ) -> list[Package]:
-        """Return cached ``installed_plugins()`` result.
-
-        Args:
-            tool_name: The host tool name (cache key).
-            manager: The plugin manager instance.
-
-        Returns:
-            The list of installed plugin packages.
-        """
-        key = f'plg:{tool_name}'
-        async with self._lock_for(key):
-            if key in self._plugins:
-                self._plugin_hits += 1
-                return self._plugins[key]
-
-            self._plugin_misses += 1
-            self._plugins[key] = await manager.installed_plugins()
-            return self._plugins[key]
-
     def invalidate_packages(self, installer: str, project_path: Path | None = None) -> None:
         """Remove cached packages for an installer so next access re-queries.
 
@@ -251,16 +204,6 @@ class PackageCache:
         if self._packages.pop(key, None) is not None:
             self._package_invalidations += 1
 
-    def invalidate_plugins(self, tool_name: str) -> None:
-        """Remove cached plugins for a tool so next access re-queries.
-
-        Args:
-            tool_name: The host tool name.
-        """
-        key = f'plg:{tool_name}'
-        if self._plugins.pop(key, None) is not None:
-            self._plugin_invalidations += 1
-
     def invalidate_all(self) -> None:
         """Clear all cached data.
 
@@ -268,9 +211,7 @@ class PackageCache:
         concurrent coroutine holds one would be unsafe.
         """
         self._package_invalidations += len(self._packages)
-        self._plugin_invalidations += len(self._plugins)
         self._packages.clear()
-        self._plugins.clear()
 
 
 @dataclass(slots=True)
@@ -283,8 +224,8 @@ class ResolutionContext:
     project_path: Path | None = None
     """Project directory for scoped package queries."""
     project_environments: dict[str, ProjectInstaller] | None = None
-    """Dict of project-environment plugins, used to look up
-    ``PluginManager`` instances for plugin-target actions."""
+    """Dict of project-environment plugins, used for project-install
+    resolution."""
     http_client: aiohttp.ClientSession | None = None
     """Shared ``aiohttp.ClientSession`` for connection pooling across
     concurrent update checks.  ``None`` means each check creates
@@ -304,13 +245,6 @@ async def _query_installed_packages(installer: str, environment: Environment, ct
     if ctx.package_cache is not None:
         return await ctx.package_cache.get_packages(installer, environment, ctx.project_path, ctx.runtime_context)
     return await environment.packages(project_path=ctx.project_path, runtime_context=ctx.runtime_context)
-
-
-async def _query_installed_plugins(plugin_name: str, manager: PluginManager, ctx: ResolutionContext) -> list[Package]:
-    """Return installed plugins for *plugin_name*, via cache when available."""
-    if ctx.package_cache is not None:
-        return await ctx.package_cache.get_plugins(plugin_name, manager)
-    return await manager.installed_plugins()
 
 
 async def resolve_operation(
@@ -349,55 +283,7 @@ async def resolve_operation(
             message='Installer or package not specified',
         )
 
-    # --- Plugin-management actions -----------------------------------------
-    if action.plugin_target is not None:
-        return await _resolve_plugin_operation(action, environments, strategy, ctx)
-
-    # --- Normal package actions --------------------------------------------
     return await _resolve_package_operation(action, environments, strategy, ctx)
-
-
-async def _resolve_plugin_operation(
-    action: SetupAction,
-    environments: dict[str, Environment],
-    strategy: SyncStrategy,
-    ctx: ResolutionContext,
-) -> ResolvedOperation:
-    """Resolve the operation for a plugin-management action."""
-    assert action.plugin_target is not None
-    assert action.package is not None
-
-    manager = find_plugin_manager(action.plugin_target.name, ctx.project_environments)
-    if manager is None:
-        # No PluginManager found — cannot determine presence, assume install
-        return ResolvedOperation(
-            action=action,
-            operation=Install(
-                available_version=action.package.constraint,
-            ),
-            plugin_manager=None,
-            message='PluginManager not available for query',
-        )
-
-    # Query installed plugins — use cache when available
-    presence = _PresenceResult(
-        env_for_updates=environments.get(action.installer) if action.installer else None,
-        introspection_python=manager.tool_python(),
-    )
-    try:
-        installed = await _query_installed_plugins(action.plugin_target.name, manager, ctx)
-        presence.is_installed, presence.detail, presence.matched = is_package_installed(action.package, installed)
-    except Exception as e:
-        logger.debug('Could not check installed plugins for %s: %s', action.plugin_target.name, e)
-
-    return await _apply_strategy(
-        action=action,
-        strategy=strategy,
-        presence=presence,
-        plugin_manager=manager,
-        http_client=ctx.http_client,
-        runtime_context=ctx.runtime_context,
-    )
 
 
 async def _resolve_package_operation(
@@ -634,44 +520,6 @@ async def check_extras_installed(
     return extras_satisfied(raw_requires, extras, installed_names)
 
 
-_PLUGIN_EXTRAS_SCRIPT = (
-    'import importlib.metadata, json, sys; '
-    'd = importlib.metadata.distribution(sys.argv[1]); '
-    'ns = [d.metadata["Name"] for d in importlib.metadata.distributions()]; '
-    'json.dump({"requires": d.requires or [], "installed": ns}, sys.stdout)'
-)
-"""Subprocess one-liner that returns *both* the ``Requires-Dist`` entries
-for a specific package **and** the names of every installed distribution.
-
-Used for plugin-target extras checks where the host process does not
-have access to the tool's own package list."""
-
-
-async def fetch_plugin_extras_context(
-    python: str,
-    package_name: str,
-) -> tuple[list[str], frozenset[str]] | None:
-    """Fetch ``Requires-Dist`` and installed names from a tool's own env.
-
-    Runs a single subprocess in *python* that returns both the
-    requirement strings for *package_name* and the complete list of
-    installed distribution names.
-
-    Returns ``(requires, installed_names)`` on success, or ``None``
-    when introspection fails.
-    """
-    raw = await _run_metadata_script(python, _PLUGIN_EXTRAS_SCRIPT, package_name, timeout_seconds=15)
-    if raw is None:
-        return None
-    try:
-        data = json.loads(raw)
-    except ValueError:
-        return None
-    requires: list[str] = data.get('requires', [])
-    installed = frozenset(canonicalize_name(n) for n in data.get('installed', []))
-    return requires, installed
-
-
 async def _extras_need_install(
     action: SetupAction,
     presence: _PresenceResult,
@@ -680,23 +528,11 @@ async def _extras_need_install(
 
     Extras are a PEP 508 concept — only Python environments can be
     introspected via ``importlib.metadata``.  When
-    ``presence.introspection_python`` is ``None``:
+    ``presence.introspection_python`` is ``None`` the installer is not
+    Python-based, so extras don't apply — return ``False``.
 
-    * For **plugin-target** actions this means the tool's interpreter
-      could not be discovered — return ``True`` conservatively so the
-      underlying plugin manager re-runs the install.
-    * For **normal package** actions this means the installer is not
-      Python-based — return ``False`` (extras don't apply).
-
-    For plugin-target actions the package metadata lives in the
-    *tool's own* environment (e.g. PDM's pipx venv), not the
-    installer's.  :func:`fetch_plugin_extras_context` retrieves
-    both the ``Requires-Dist`` entries and the full set of
-    installed distribution names in a single subprocess call.
-
-    For normal package actions, ``installed_names`` is already
-    populated on ``presence`` so only the ``Requires-Dist``
-    entries need fetching.
+    ``installed_names`` is already populated on ``presence`` so only
+    the ``Requires-Dist`` entries need fetching.
 
     When introspection fails the result is conservatively ``True``
     (re-install to ensure the extras are present).
@@ -705,19 +541,9 @@ async def _extras_need_install(
         return False
 
     if presence.introspection_python is None:
-        # Plugin-target with no discoverable Python → conservative
-        # Normal package with non-Python installer → not applicable
-        return action.plugin_target is not None
+        # Non-Python installer → not applicable
+        return False
 
-    # --- Plugin-target actions: fetch both requires + installed names --
-    if action.plugin_target is not None:
-        context = await fetch_plugin_extras_context(presence.introspection_python, action.package.name)
-        if context is None:
-            return True  # subprocess failed → conservative
-        requires, installed_names = context
-        return not extras_satisfied(requires, action.package.extras, installed_names)
-
-    # --- Normal package actions: installed_names already on presence ---
     result = await check_extras_installed(
         presence.introspection_python,
         action.package.name,
@@ -741,10 +567,9 @@ class _PresenceResult:
     introspection_python: str | None = None
     """Python interpreter to use for ``importlib.metadata`` introspection.
 
-    For normal packages this is the installer's Python (from
-    ``PythonEnvironment.python_command``).  For plugin-target actions
-    this is the tool's own Python (from ``PluginManager.tool_python``).
-    ``None`` means extras introspection is not available."""
+    This is the installer's Python (from
+    ``PythonEnvironment.python_command``).  ``None`` means extras
+    introspection is not available."""
 
 
 async def _resolve_latest_installed(
@@ -752,7 +577,6 @@ async def _resolve_latest_installed(
     action: SetupAction,
     presence: _PresenceResult,
     installed_ver: str | None,
-    plugin_manager: PluginManager | None,
     http_client: aiohttp.ClientSession | None,
     runtime_context: RuntimeContext | None,
 ) -> ResolvedOperation:
@@ -783,7 +607,6 @@ async def _resolve_latest_installed(
                         available_version=newer,
                     ),
                     message=f'{pkg_name} {installed_ver} → {newer}',
-                    plugin_manager=plugin_manager,
                 )
             # Version is latest — check whether extras still need ensuring.
             if await _extras_need_install(action, presence):
@@ -794,7 +617,6 @@ async def _resolve_latest_installed(
                         installed_version=installed_ver,
                     ),
                     message='ensuring extras',
-                    plugin_manager=plugin_manager,
                 )
             return ResolvedOperation(
                 action=action,
@@ -803,7 +625,6 @@ async def _resolve_latest_installed(
                     installed_version=installed_ver,
                 ),
                 message=presence.detail,
-                plugin_manager=plugin_manager,
             )
 
     # No environment for update checks, or check failed — upgrade
@@ -812,7 +633,6 @@ async def _resolve_latest_installed(
         action=action,
         operation=Upgrade(),
         message=presence.detail,
-        plugin_manager=plugin_manager,
     )
 
 
@@ -821,15 +641,13 @@ async def _apply_strategy(
     action: SetupAction,
     strategy: SyncStrategy,
     presence: _PresenceResult,
-    plugin_manager: PluginManager | None = None,
     http_client: aiohttp.ClientSession | None = None,
     runtime_context: RuntimeContext | None = None,
 ) -> ResolvedOperation:
     """Apply the sync strategy to determine the operation.
 
     This is the single source of truth for the install/upgrade/skip
-    decision.  Both normal packages and plugin-management actions
-    share this logic.
+    decision.
 
     When an already-installed package is skipped under MINIMAL
     strategy, an upstream version check is always performed so that
@@ -854,7 +672,6 @@ async def _apply_strategy(
                         installed_version=installed_ver,
                     ),
                     message='ensuring extras',
-                    plugin_manager=plugin_manager,
                 )
 
             # Always check for updates so version metadata is populated
@@ -889,7 +706,6 @@ async def _apply_strategy(
                     available_version=available_ver,
                 ),
                 message=msg,
-                plugin_manager=plugin_manager,
             )
         # Not installed → install
         return ResolvedOperation(
@@ -897,7 +713,6 @@ async def _apply_strategy(
             operation=Install(
                 available_version=action.package.constraint,
             ),
-            plugin_manager=plugin_manager,
         )
 
     # LATEST strategy
@@ -906,7 +721,6 @@ async def _apply_strategy(
             action=action,
             presence=presence,
             installed_ver=installed_ver,
-            plugin_manager=plugin_manager,
             http_client=http_client,
             runtime_context=runtime_context,
         )
@@ -918,7 +732,6 @@ async def _apply_strategy(
             available_version=action.package.constraint,
         ),
         message='not installed, will install instead',
-        plugin_manager=plugin_manager,
     )
 
 

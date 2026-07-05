@@ -6,12 +6,10 @@ Covers ``SkipReason.UPDATE_AVAILABLE`` / ``ALREADY_INSTALLED`` paths,
 version fields on ``SetupActionResult``, and version propagation on
 ``Upgrade`` results.
 
-Resolution primitives live in ``test_update_detection_resolution.py`` and
-manifest PluginSpec parsing lives in ``test_update_detection_spec.py``.
+Resolution primitives live in ``test_update_detection_resolution.py``.
 """
 
 from dataclasses import replace
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from porringer.backend.command.core.presence import inspect_action
 from porringer.core.plugin_schema.environment import CheckUpdatesParameters
@@ -28,9 +26,6 @@ from tests.unit.update_detection_helpers import (
 )
 from tests.unit.update_detection_helpers import (
     make_env as _make_env,
-)
-from tests.unit.update_detection_helpers import (
-    make_plugin_action as _make_plugin_action,
 )
 
 
@@ -240,52 +235,6 @@ class TestLatestStrategySkip:
         assert result.skip_reason == SkipReason.ALREADY_LATEST
         assert result.available_version is None
 
-    @staticmethod
-    async def test_latest_plugin_target_skips_when_at_latest() -> None:
-        """Plugin-target actions under LATEST also skip when at latest."""
-        action = _make_plugin_action()
-        env = _make_env(updates=[Package(name='cppython', version='0.9.14')])  # same version
-        envs = {'pipx': env}
-
-        manager = MagicMock()
-        manager.installed_plugins = AsyncMock(return_value=[Package(name='cppython', version='0.9.14')])
-        manager.tool_name.return_value = 'pdm'
-        manager.is_available.return_value = True
-
-        params = SetupParameters(strategy=SyncStrategy.LATEST)
-
-        with patch(
-            'porringer.backend.command.core.resolution.find_plugin_manager',
-            return_value=manager,
-        ):
-            result = await inspect_action(action, envs, parameters=params)
-
-        assert result.skipped is True
-        assert result.skip_reason == SkipReason.ALREADY_LATEST
-
-    @staticmethod
-    async def test_latest_plugin_target_upgrades_when_newer() -> None:
-        """Plugin-target actions under LATEST do upgrade when newer version exists."""
-        action = _make_plugin_action()
-        env = _make_env(updates=[Package(name='cppython', version='1.0.0')])
-        envs = {'pipx': env}
-
-        manager = MagicMock()
-        manager.installed_plugins = AsyncMock(return_value=[Package(name='cppython', version='0.9.14')])
-        manager.tool_name.return_value = 'pdm'
-        manager.is_available.return_value = True
-
-        params = SetupParameters(strategy=SyncStrategy.LATEST)
-
-        with patch(
-            'porringer.backend.command.core.resolution.find_plugin_manager',
-            return_value=manager,
-        ):
-            result = await inspect_action(action, envs, parameters=params)
-
-        assert result.skipped is False
-        assert result.success is True
-
 
 class TestInspectionActionDispatch:
     """Verify the top-level inspect_action passes parameters through."""
@@ -317,109 +266,6 @@ class TestInspectionActionDispatch:
         result = await inspect_action(action, {}, parameters=params)
         assert result.success is True
         assert result.skipped is False
-
-
-class TestPluginTargetUpdateDetection:
-    """Verify update detection for plugin-management actions (e.g. cppython→pdm)."""
-
-    @staticmethod
-    async def test_plugin_upgrade_available() -> None:
-        """When a newer version exists, plugin gets UPDATE_AVAILABLE."""
-        action = _make_plugin_action()
-        env = _make_env(updates=[Package(name='cppython', version='1.0.0')])
-        envs = {'pipx': env}
-
-        manager = MagicMock()
-        manager.installed_plugins = AsyncMock(return_value=[Package(name='cppython', version='0.9.14')])
-        manager.tool_name.return_value = 'pdm'
-        manager.is_available.return_value = True
-
-        params = SetupParameters()
-
-        with patch(
-            'porringer.backend.command.core.resolution.find_plugin_manager',
-            return_value=manager,
-        ):
-            result = await inspect_action(action, envs, parameters=params)
-
-        assert result.skipped is True
-        assert result.skip_reason == SkipReason.UPDATE_AVAILABLE
-        assert result.installed_version == '0.9.14'
-        assert result.available_version == '1.0.0'
-
-    @staticmethod
-    async def test_plugin_no_update() -> None:
-        """When no newer version exists, plugin gets ALREADY_INSTALLED."""
-        action = _make_plugin_action()
-        env = _make_env(updates=[Package(name='cppython', version='0.9.14')])
-        envs = {'pipx': env}
-
-        manager = MagicMock()
-        manager.installed_plugins = AsyncMock(return_value=[Package(name='cppython', version='0.9.14')])
-        manager.tool_name.return_value = 'pdm'
-        manager.is_available.return_value = True
-
-        params = SetupParameters()
-
-        with patch(
-            'porringer.backend.command.core.resolution.find_plugin_manager',
-            return_value=manager,
-        ):
-            result = await inspect_action(action, envs, parameters=params)
-
-        assert result.skipped is True
-        assert result.skip_reason == SkipReason.ALREADY_INSTALLED
-
-    @staticmethod
-    async def test_plugin_always_checks_for_updates() -> None:
-        """Plugin-management actions always perform update checks."""
-        action = _make_plugin_action()
-        env = _make_env(updates=[Package(name='cppython', version='1.0.0')])
-        envs = {'pipx': env}
-
-        manager = MagicMock()
-        manager.installed_plugins = AsyncMock(return_value=[Package(name='cppython', version='0.9.14')])
-        manager.tool_name.return_value = 'pdm'
-        manager.is_available.return_value = True
-
-        params = SetupParameters()
-
-        with patch(
-            'porringer.backend.command.core.resolution.find_plugin_manager',
-            return_value=manager,
-        ):
-            result = await inspect_action(action, envs, parameters=params)
-
-        env.check_updates.assert_called_once()
-        assert result.skip_reason == SkipReason.UPDATE_AVAILABLE
-
-    @staticmethod
-    async def test_plugin_per_package_prereleases() -> None:
-        """Per-package include_prereleases on a plugin action is threaded to check_updates."""
-        action = _make_plugin_action(include_prereleases=True)
-        env = _make_env(
-            updates=[Package(name='cppython', version='1.0.0a1')],
-        )
-        envs = {'pipx': env}
-
-        manager = MagicMock()
-        manager.installed_plugins = AsyncMock(return_value=[Package(name='cppython', version='0.9.14')])
-        manager.tool_name.return_value = 'pdm'
-        manager.is_available.return_value = True
-
-        params = SetupParameters()
-
-        with patch(
-            'porringer.backend.command.core.resolution.find_plugin_manager',
-            return_value=manager,
-        ):
-            result = await inspect_action(action, envs, parameters=params)
-
-        # Per-action flag is threaded through
-        call_args = env.check_updates.call_args
-        check_params: CheckUpdatesParameters = call_args[0][0]
-        assert check_params.include_prereleases is True
-        assert result.skip_reason == SkipReason.UPDATE_AVAILABLE
 
 
 class TestPrereleasePackagesOverride:
@@ -534,7 +380,3 @@ class TestUpgradeVersionFields:
         assert result.skipped is True
         assert result.success is True
         assert result.installed_version == '0.8.0'
-
-        # Build one without — defaults to False
-        action2 = _make_plugin_action(include_prereleases=False)
-        assert action2.include_prereleases is False

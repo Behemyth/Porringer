@@ -280,15 +280,11 @@ class PackageRelationKind(Enum):
     """Kind of relationship a package has with a host tool.
 
     Used to distinguish how a sub-package was added to its host:
-    via tool-level injection (e.g. ``pipx inject``) or via native
-    plugin management (e.g. ``pdm self add``).
+    via tool-level injection (e.g. ``pipx inject``).
     """
 
     INJECTED = 'injected'
     """Package was injected into a host tool's isolated environment."""
-
-    PLUGIN = 'plugin'
-    """Package was added via the host tool's native plugin management."""
 
 
 class PackageRelation(PorringerModel):

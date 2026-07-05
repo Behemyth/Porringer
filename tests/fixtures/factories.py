@@ -73,7 +73,6 @@ def setup_action(
     kind: PluginKind = PluginKind.TOOL,
     ecosystem: str = 'python',
     installer: str = 'pipx',
-    target: str | None = None,
     constraint: str | None = None,
     include_prereleases: bool = False,
     runtime_tag: str | None = None,
@@ -86,7 +85,6 @@ def setup_action(
         kind: The plugin kind discriminator.
         ecosystem: Ecosystem identifier.
         installer: The installer plugin name.
-        target: Parent tool for plugin-management actions, or ``None``.
         constraint: Optional version constraint appended to ``name``.
         include_prereleases: Per-package pre-release opt-in.
         runtime_tag: Optional runtime tag.
@@ -96,16 +94,14 @@ def setup_action(
         A constructed ``SetupAction``.
     """
     pkg = PackageRef.model_validate(name if constraint is None else f'{name}{constraint}')
-    target_ref = PackageRef.model_validate(target) if target is not None else None
     if description is None:
-        description = f"Install '{pkg}' to '{target}'" if target is not None else f"Install '{pkg}' via {installer}"
+        description = f"Install '{pkg}' via {installer}"
     return SetupAction(
         description=description,
         kind=kind,
         ecosystem=Ecosystem(ecosystem),
         installer=installer,
         package=pkg,
-        plugin_target=target_ref,
         include_prereleases=include_prereleases,
         runtime_tag=runtime_tag,
     )

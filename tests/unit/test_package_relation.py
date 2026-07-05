@@ -1,19 +1,18 @@
 """Helpers for test package relation.
 
-Tests for PackageRelation, pipx injection metadata, PluginManager relation, and PackageCache.
+Tests for PackageRelation, pipx injection metadata, and PackageCache.
 """
 
 import asyncio
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from packaging.version import Version
 
 from porringer.backend.command.core.resolution import PackageCache, is_package_installed
 from porringer.core.plugin_schema.environment import Environment
-from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.schema import (
     Distribution,
     Package,
@@ -29,9 +28,6 @@ _MOCK_PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0
 
 _EXPECTED_PIPX_PACKAGES = 3
 """pdm + cppython (injected) + ruff."""
-
-_EXPECTED_PLUGIN_NAMES = 2
-"""Two lines in the parse_plugin_list fixture."""
 
 _EXPECTED_TWO_CALLS = 2
 """Sentinel for assertions that expect exactly two invocations."""
@@ -62,17 +58,6 @@ class TestPackageRelationSchema:
         assert pkg.relation is not None
         assert pkg.relation.host == 'pdm'
         assert pkg.relation.kind == PackageRelationKind.INJECTED
-
-    @staticmethod
-    def test_package_with_plugin_relation() -> None:
-        """Package can carry a PLUGIN relation."""
-        pkg = Package(
-            name='cppython',
-            version='0.2.0',
-            relation=PackageRelation(host='pdm', kind=PackageRelationKind.PLUGIN),
-        )
-        assert pkg.relation is not None
-        assert pkg.relation.kind == PackageRelationKind.PLUGIN
 
     @staticmethod
     def test_pydantic_round_trip() -> None:
@@ -193,31 +178,6 @@ class TestPipxInjectedPackages:
 
 
 # ---------------------------------------------------------------------------
-# PluginManager.parse_plugin_list — relation annotation
-# ---------------------------------------------------------------------------
-
-
-class TestPluginManagerRelation:
-    """Verify parse_plugin_list and installed_plugins relation annotation."""
-
-    @staticmethod
-    def test_parse_plugin_list_returns_packages() -> None:
-        """parse_plugin_list returns packages without relation (applied by installed_plugins)."""
-        stdout = 'cppython\nsome-other-plugin\n'
-        packages = PluginManager.parse_plugin_list(stdout)
-
-        assert len(packages) == _EXPECTED_PLUGIN_NAMES
-        for pkg in packages:
-            assert pkg.relation is None
-
-    @staticmethod
-    def test_parse_plugin_list_empty() -> None:
-        """Empty output returns empty list."""
-        packages = PluginManager.parse_plugin_list('')
-        assert packages == []
-
-
-# ---------------------------------------------------------------------------
 # PackageCache
 # ---------------------------------------------------------------------------
 
@@ -247,7 +207,6 @@ class TestPackageCache:
         stats = cache.stats()
         assert stats.package_misses == 1
         assert stats.package_hits == _EXPECTED_TWO_CALLS
-        assert stats.plugin_misses == 0
 
     @staticmethod
     async def test_different_installers_cached_separately() -> None:
@@ -305,24 +264,6 @@ class TestPackageCache:
         await cache.get_packages('pip', env)
 
         assert env.packages.await_count == _EXPECTED_TWO_CALLS
-
-    @staticmethod
-    async def test_plugin_cache_single_call() -> None:
-        """installed_plugins() is called once with multiple get_plugins() calls."""
-        manager = MagicMock(spec=PluginManager)
-        manager.installed_plugins = AsyncMock(return_value=[Package(name='cppython', version='0.5.0')])
-
-        cache = PackageCache()
-
-        result1 = await cache.get_plugins('pdm', manager)
-        result2 = await cache.get_plugins('pdm', manager)
-
-        assert result1 == result2
-        manager.installed_plugins.assert_awaited_once()
-
-        stats = cache.stats()
-        assert stats.plugin_misses == 1
-        assert stats.plugin_hits == 1
 
     @staticmethod
     async def test_concurrent_access_serializes() -> None:

@@ -75,6 +75,7 @@ class ManifestValidationCode(Enum):
     INVALID_PACKAGE_NAME = 'invalid_package_name'
     DUPLICATE_PACKAGE = 'duplicate_package'
     UNKNOWN_FIELD = 'unknown_field'
+    REMOVED_FIELD = 'removed_field'
     PATH_NOT_FOUND = 'path_not_found'
     NO_MANIFEST = 'no_manifest'
     LOAD_FAILED = 'load_failed'

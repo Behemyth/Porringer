@@ -5,19 +5,15 @@ Plugin implementation for PDM project environment.
 
 from typing import override
 
-from porringer.core.plugin_schema.plugin_manager import PluginManager
 from porringer.core.plugin_schema.project_environment import ProjectEnvironment
-from porringer.core.schema import Ecosystem, Package, PackageRef
+from porringer.core.schema import Ecosystem
 
 
-class PDMEnvironment(ProjectEnvironment, PluginManager):
+class PDMEnvironment(ProjectEnvironment):
     """Project environment managed by PDM.
 
     Delegates venv creation, dependency resolution, and lock-file
     synchronisation to `pdm install`.
-
-    Implements ``PluginManager`` so that declared sub-plugins are
-    installed via ``pdm self add``.
     """
 
     _project_evidence_files = ('pdm.lock',)
@@ -40,64 +36,3 @@ class PDMEnvironment(ProjectEnvironment, PluginManager):
     def tool_name(cls) -> str:
         """PDM wraps the `pdm` CLI."""
         return 'pdm'
-
-    @override
-    def plugin_install_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
-        """Return ``pdm self add <plugin>``.
-
-        When *include_prereleases* is ``True``, appends
-        ``--pip-args=--pre`` so that pip considers pre-release
-        versions.
-        """
-        cmd = ['pdm', 'self', 'add']
-        if include_prereleases:
-            cmd.append('--pip-args=--pre')
-        cmd.append(plugin.specifier)
-        return cmd
-
-    @override
-    def plugin_upgrade_command(self, plugin: PackageRef, *, include_prereleases: bool = False) -> list[str]:
-        """Return ``pdm self add --pip-args="--upgrade [--pre]" <plugin>``.
-
-        PDM's ``self update`` updates PDM itself and does not accept a
-        package argument.  ``self add`` without extra flags is a no-op
-        when the plugin is already installed, so ``--pip-args=--upgrade``
-        is required to force pip to pull a newer version.
-
-        When *include_prereleases* is ``True``, ``--pre`` is included in
-        the same ``--pip-args`` value so that pip considers pre-release
-        versions.  All pip arguments must be passed in a single
-        ``--pip-args`` value because PDM does not combine multiple
-        ``--pip-args`` flags — only the last one takes effect.
-
-        The ``=`` syntax is mandatory because ``--upgrade`` starts with
-        ``--`` and argparse would otherwise treat it as a separate flag.
-        """
-        pip_args = '--upgrade'
-        if include_prereleases:
-            pip_args += ' --pre'
-        cmd = ['pdm', 'self', 'add', f'--pip-args={pip_args}']
-        cmd.append(plugin.specifier)
-        return cmd
-
-    @override
-    def plugin_list_command(self) -> list[str]:
-        """Return ``pdm self list --plugins``."""
-        return ['pdm', 'self', 'list', '--plugins']
-
-    @staticmethod
-    @override
-    def parse_plugin_list(stdout: str) -> list[Package]:
-        """Parse ``pdm self list --plugins`` output.
-
-        Each line has the format ``name version [description...]``.
-        """
-        _min_versioned_parts = 2
-        plugins: list[Package] = []
-        for line in stdout.splitlines():
-            parts = line.split()
-            if len(parts) >= _min_versioned_parts:
-                plugins.append(Package(name=parts[0], version=parts[1]))
-            elif parts:
-                plugins.append(Package(name=parts[0], version=None))
-        return plugins

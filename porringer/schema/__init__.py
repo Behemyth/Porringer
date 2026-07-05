@@ -49,7 +49,6 @@ from porringer.schema.manifest import (
     ManifestMetadata,
     ManifestValidationResult,
     PackageSpec,
-    PluginSpec,
     SetupManifest,
 )
 from porringer.schema.observability import (
@@ -146,7 +145,6 @@ __all__ = [
     'PluginCapability',
     'PluginInfo',
     'PluginsDiscoveredEvent',
-    'PluginSpec',
     'Remediation',
     'ReplayRecord',
     'ResultEnvelope',

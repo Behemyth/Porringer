@@ -9,9 +9,10 @@ import os
 from pathlib import Path
 from typing import override
 
-from porringer.core.plugin_schema.plugin_manager import find_tool_python
+from porringer.core.plugin_schema.environment import BootstrapRequirement
 from porringer.core.plugin_schema.python_environment import PythonEnvironment
 from porringer.core.plugin_schema.runtime import RuntimeContext
+from porringer.core.plugin_schema.tool_based import find_tool_python
 from porringer.core.schema import Package, PackageRef, PackageRelation, PackageRelationKind, PluginKind
 from porringer.utility.concurrency import gather_bounded
 
@@ -106,6 +107,12 @@ class PIPXEnvironment(PythonEnvironment):
     def tool_name(cls) -> str:
         """Pipx wraps the `pipx` CLI."""
         return 'pipx'
+
+    @classmethod
+    @override
+    def bootstrap_requirement(cls) -> BootstrapRequirement | None:
+        """Pipx itself is installed via pip before it can install other tools."""
+        return BootstrapRequirement(installer='pip', package=PackageRef.model_validate('pipx'))
 
     @staticmethod
     @override

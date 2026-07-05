@@ -7,6 +7,8 @@ import contextlib
 import logging
 from abc import abstractmethod
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from typing import Literal
 
@@ -18,6 +20,7 @@ from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import (
     Package,
     PackageRef,
+    PluginKind,
     PorringerModel,
 )
 from porringer.schema import ActionProgress, SetupAction
@@ -26,6 +29,27 @@ from porringer.utility.concurrency import gather_bounded
 from porringer.utility.utility import CommandProgress, run_command
 
 PackageVerb = Literal['install', 'upgrade', 'uninstall']
+
+
+@dataclass(frozen=True, slots=True)
+class BootstrapRequirement:
+    """Describes a prerequisite package needed before a tool can be used.
+
+    For example, ``pipx`` must itself be installed via ``pip`` before it
+    can be used to install other CLI tools.  The sync engine uses this
+    to synthesize the prerequisite install automatically.
+
+    Args:
+        installer: Name of the environment plugin that installs the
+            prerequisite (e.g. ``'pip'``).
+        package: The prerequisite package to install (e.g. ``'pipx'``).
+        kind: The plugin-kind section the synthesized action belongs
+            to. Defaults to ``PluginKind.PACKAGE``.
+    """
+
+    installer: str
+    package: PackageRef
+    kind: PluginKind = dataclass_field(default=PluginKind.PACKAGE)
 
 
 class PackageParameters(PorringerModel):
@@ -203,6 +227,26 @@ class Environment(ToolBasedPlugin):
         return True
 
     # --- Optional plugin hooks --------------------------------------------
+
+    @classmethod
+    def bootstrap_requirement(cls) -> BootstrapRequirement | None:
+        """Declare a prerequisite package needed before this tool can run.
+
+        Some tools (e.g. ``pipx``) are themselves installed as a package
+        via another environment (e.g. ``pip``) before they can install
+        anything else.  Overriding this hook lets the sync engine
+        synthesize that bootstrap install automatically instead of
+        requiring users to declare it explicitly in the manifest.
+
+        Default is ``None`` — most plugins have no bootstrap
+        prerequisite (they are expected to already be on PATH, or are
+        installed via a runtime provider).
+
+        Returns:
+            A :class:`BootstrapRequirement` describing the prerequisite
+            package and the installer that provides it, or ``None``.
+        """
+        return None
 
     def dry_run_flags(self, verb: PackageVerb) -> Sequence[str]:
         """Return extra CLI flags that turn *verb* into a no-op rehearsal.

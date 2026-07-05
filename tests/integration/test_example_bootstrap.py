@@ -56,28 +56,36 @@ class TestBootstrapPreview:
 
     @staticmethod
     def test_package_actions_present(preview: SetupResults) -> None:
-        """A PACKAGE action for pipx should be in the plan."""
+        """No manifest-declared PACKAGE entries remain.
+
+        pipx bootstrap (installing pipx via pip) is only synthesized when
+        pdm's TOOL action is deferred (pipx not yet available). When pipx
+        is already on PATH, no PACKAGE action is needed at all — this
+        keeps the test correct across both bootstrap and already-set-up
+        environments.
+        """
+        tool_actions = [a for a in preview.actions if a.kind == PluginKind.TOOL and a.ecosystem == 'python']
         package_actions = [a for a in preview.actions if a.kind == PluginKind.PACKAGE and a.ecosystem == 'python']
-        assert len(package_actions) == 1
-        assert package_actions[0].package is not None
-        assert package_actions[0].package.name == 'pipx'
+        assert len(tool_actions) == 1
+
+        if tool_actions[0].installer is None:
+            assert len(package_actions) == 1
+            assert package_actions[0].package is not None
+            assert package_actions[0].package.name == 'pipx'
+        else:
+            assert len(package_actions) == 0
 
     @staticmethod
     def test_tool_actions_present(preview: SetupResults) -> None:
-        """TOOL actions for pdm and its cppython plugin should be in the plan.
+        """A TOOL action for pdm should be in the plan.
 
         The tool action may have `installer=None` (deferred) if pipx
         is not currently available — this is expected and correct.
         """
         tool_actions = [a for a in preview.actions if a.kind == PluginKind.TOOL and a.ecosystem == 'python']
-        expected_tool_count = 2
-        assert len(tool_actions) == expected_tool_count
+        assert len(tool_actions) == 1
         assert tool_actions[0].package is not None
         assert tool_actions[0].package.name == 'pdm'
-        assert tool_actions[1].package is not None
-        assert tool_actions[1].package.name == 'cppython'
-        assert tool_actions[1].plugin_target is not None
-        assert tool_actions[1].plugin_target.name == 'pdm'
 
     @staticmethod
     def test_project_sync_action_present(preview: SetupResults) -> None:
@@ -97,11 +105,11 @@ class TestBootstrapPreview:
 
     @staticmethod
     def test_all_action_phases_present(preview: SetupResults) -> None:
-        """The plan should contain every action phase: runtime, package, tool, project, scm.
+        """The plan should contain the runtime, tool, project, and scm phases.
 
-        The preview lists the actions the execution engine will later reorder
-        into runtime → package → tool → project → scm phases.  This verifies
-        each phase is represented.
+        PACKAGE is not asserted unconditionally: it only appears when the
+        pipx bootstrap (installing pipx via pip) is synthesized, which
+        only happens when pipx itself is not yet available on this host.
         """
         kinds = []
         for a in preview.actions:
@@ -119,7 +127,6 @@ class TestBootstrapPreview:
                 kinds.append('other')
 
         assert 'runtime' in kinds
-        assert 'package' in kinds
         assert 'tool' in kinds
         assert 'project' in kinds
         assert 'scm' in kinds

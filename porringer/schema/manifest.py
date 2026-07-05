@@ -74,50 +74,11 @@ class ManifestValidationResult:
         return [d for d in self.diagnostics if d.severity == ManifestDiagnosticSeverity.WARNING]
 
 
-class PluginSpec(PorringerModel):
-    """A plugin sub-package entry with optional metadata.
-
-    Supports both string shorthand (just a package specifier) and object form
-    with per-plugin options::
-
-        "cppython"  # string shorthand
-
-        {'name': 'cppython', 'include_prereleases': true}  # object form
-    """
-
-    name: PackageRef = Field(description='The plugin package reference (name with optional version constraint)')
-    description: str | None = Field(default=None, description='Human-readable description of this plugin')
-    include_prereleases: bool = Field(
-        default=False,
-        description='Include pre-release versions when checking this plugin for updates',
-    )
-
-    @model_validator(mode='before')
-    @classmethod
-    def _coerce_string(cls, data: Any) -> Any:
-        """Allow plain strings as shorthand for `{"name": "..."}`."""
-        if isinstance(data, str):
-            return {'name': data}
-        return data
-
-
 class PackageSpec(PlatformScoped):
     """A package entry with optional display metadata.
 
     Supports both string shorthand (just a package specifier) and object form
     with additional metadata for GUI consumers.
-
-    The optional `plugins` list declares sub-packages that should be
-    added to the parent package via its native plugin management
-    after it is installed.  For example, a PDM installation can
-    declare `cppython` as a plugin so that `pdm self add cppython`
-    is executed automatically::
-
-        {'name': 'pdm', 'plugins': ['cppython']}
-        {'name': 'pdm', 'plugins': [{'name': 'cppython', 'include_prereleases': true}]}
-
-    The field is generic — any tool whose project-environment plugin
-    implements ``PluginManager`` can use it.
     """
 
     name: PackageRef = Field(description='The package reference (name with optional version constraint)')
@@ -125,10 +86,6 @@ class PackageSpec(PlatformScoped):
     include_prereleases: bool = Field(
         default=False,
         description='Include pre-release versions when checking this package for updates',
-    )
-    plugins: list[PluginSpec] = Field(
-        default_factory=list,
-        description="Sub-packages to add via this tool's native plugin management after installation",
     )
 
     @model_validator(mode='before')

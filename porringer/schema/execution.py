@@ -162,11 +162,6 @@ class SetupAction:
     * `PluginKind.PROJECT` — sync a project lock-file / venv.
     * `PluginKind.SCM` — clone a repository.
 
-    When `plugin_target` is set the action is a *plugin-management*
-    action: the `package` is added to the `plugin_target` parent
-    tool via its native ``PluginManager`` (e.g.
-    ``pdm self add cppython``).
-
     Frozen and hashable — can be used as dict keys and in sets.
 
     Args:
@@ -175,7 +170,6 @@ class SetupAction:
         ecosystem: The ecosystem identifier (e.g. `"python"`, `"node"`).
         installer: The plugin name (for PACKAGE/TOOL/RUNTIME/PROJECT/SCM).
         package: The package reference (for PACKAGE/TOOL/RUNTIME/SCM).
-        plugin_target: The parent tool for plugin actions, or `None`.
         package_description: Optional per-package description from the manifest.
         include_prereleases: Per-package opt-in for pre-release update detection.
     """
@@ -185,7 +179,6 @@ class SetupAction:
     ecosystem: Ecosystem | None = None
     installer: str | None = None
     package: PackageRef | None = None
-    plugin_target: PackageRef | None = None
     package_description: str | None = None
     include_prereleases: bool = False
     runtime_tag: str | None = None

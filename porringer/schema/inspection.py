@@ -50,7 +50,6 @@ class ActionSnapshot(PorringerModel):
     package: str | None = None
     package_name: str | None = None
     package_constraint: str | None = None
-    plugin_target: str | None = None
     package_description: str | None = None
     include_prereleases: bool = False
     runtime_tag: str | None = None

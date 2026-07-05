@@ -18,6 +18,7 @@ import logging
 import re
 import shutil
 import subprocess
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -312,3 +313,67 @@ class ToolBasedPlugin(Plugin):
             logger.error(result.stderr)
             return False
         return True
+
+
+# ---------------------------------------------------------------------------
+# Tool interpreter discovery
+# ---------------------------------------------------------------------------
+
+
+def find_tool_python(tool_name: str) -> str | None:
+    """Find the Python interpreter inside a CLI tool's own environment.
+
+    Works for tools installed via pipx, uv tool, or pip by inspecting
+    the tool's executable:
+
+    1. If the executable lives inside a virtual environment (has a
+       ``pyvenv.cfg`` ancestor), the venv's ``python`` is returned.
+    2. Otherwise, the executable (or binary launcher) is read and a
+       ``#!`` shebang line is extracted to locate the interpreter.
+
+    Returns ``None`` when the interpreter cannot be determined.
+    """
+    tool_path = shutil.which(tool_name)
+    if tool_path is None:
+        return None
+
+    tool_exe = Path(tool_path).resolve()
+
+    # Check if the tool itself lives inside a venv
+    for parent in tool_exe.parents:
+        if (parent / 'pyvenv.cfg').exists():
+            python = parent / 'Scripts' / 'python.exe' if sys.platform == 'win32' else parent / 'bin' / 'python'
+            if python.is_file():
+                return str(python)
+            break
+
+    # Parse the executable for an embedded interpreter path (shebang)
+    try:
+        raw = tool_exe.read_bytes()
+    except OSError:
+        return None
+
+    text = raw.decode('utf-8', errors='replace')
+    match = re.search(r'#!([^\r\n]*[Pp]ython[^\r\n]*)', text)
+    if not match:
+        return None
+
+    return _resolve_shebang(match.group(1).strip())
+
+
+def _resolve_shebang(shebang: str) -> str | None:
+    """Resolve a shebang string to a Python interpreter path."""
+    # Handle "#!/usr/bin/env python3"
+    if '/env ' in shebang or '\\env ' in shebang:
+        return shutil.which(shebang.rsplit(maxsplit=1)[-1])
+
+    # Direct path — try as-is, then with .exe suffix on Windows
+    candidate = Path(shebang)
+    if candidate.is_file():
+        return str(candidate)
+    if sys.platform == 'win32' and not shebang.lower().endswith('.exe'):
+        candidate = candidate.with_suffix('.exe')
+        if candidate.is_file():
+            return str(candidate)
+
+    return None

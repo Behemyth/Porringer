@@ -44,10 +44,14 @@ class TestBootstrapPresence:
 
     @staticmethod
     def test_all_manifest_sections_produce_results(inspection_results: list[ActionInspection]) -> None:
-        """Every manifest section yields at least one result."""
+        """Every manifest section yields at least one result.
+
+        PACKAGE is not asserted unconditionally: it only appears when the
+        pipx bootstrap (installing pipx via pip) is synthesized, which
+        only happens when pipx itself is not yet available on this host.
+        """
         kinds = {r.action.kind for r in inspection_results}
         assert PluginKind.RUNTIME.value in kinds, 'No RUNTIME result'
-        assert PluginKind.PACKAGE.value in kinds, 'No PACKAGE result'
         assert PluginKind.TOOL.value in kinds, 'No TOOL result'
         assert PluginKind.PROJECT.value in kinds, 'No PROJECT result'
         assert PluginKind.SCM.value in kinds, 'No SCM result'

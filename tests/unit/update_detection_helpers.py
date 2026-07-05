@@ -38,21 +38,3 @@ def make_env(
     type(env).package_name_validator = MagicMock(return_value='pep440')
     env.tool_name.return_value = 'pip'
     return env
-
-
-def make_plugin_action(
-    name: str = 'cppython',
-    installer: str = 'pipx',
-    plugin_target: str = 'pdm',
-    include_prereleases: bool = False,
-) -> SetupAction:
-    """Create a plugin-target SetupAction (e.g. cppython added to pdm)."""
-    return SetupAction(
-        description=f"Install plugin '{name}' to '{plugin_target}' via {installer}",
-        kind=PluginKind.TOOL,
-        ecosystem=Ecosystem('python'),
-        installer=installer,
-        package=PackageRef.model_validate(name),
-        plugin_target=PackageRef.model_validate(plugin_target),
-        include_prereleases=include_prereleases,
-    )

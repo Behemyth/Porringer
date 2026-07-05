@@ -69,19 +69,21 @@ class TestBootstrapDeferredPackage:
 
     Simulates a fresh Windows machine where only the ``py`` launcher
     is available (pim installs runtimes), but neither ``pip``,
-    ``python``, nor ``uv`` are on PATH.  In this scenario PACKAGE
-    actions must be **deferred** (not silently skipped) so that the
-    phase-transition after runtime installation can resolve them.
+    ``python``, ``uv``, nor ``pipx`` are on PATH.  In this scenario the
+    pdm TOOL action defers (pipx unavailable) and its synthesized pipx
+    bootstrap PACKAGE action must also be **deferred** (not silently
+    dropped), so that the phase-transition after runtime installation
+    can resolve them.
     """
 
     @staticmethod
     @pytest.fixture
     def preview_no_pip() -> SetupResults:
-        """Preview the bootstrap manifest with pip, python, and uv unavailable."""
+        """Preview the bootstrap manifest with pip, python, uv, and pipx unavailable."""
         original_which = __import__('shutil').which
 
         def _which_no_pip(cmd: str) -> str | None:
-            if cmd in {'pip', 'python', 'uv'}:
+            if cmd in {'pip', 'python', 'uv', 'pipx'}:
                 return None
             return original_which(cmd)
 
@@ -92,9 +94,8 @@ class TestBootstrapDeferredPackage:
     def test_package_actions_deferred(preview_no_pip: SetupResults) -> None:
         """PACKAGE actions should be deferred, not dropped.
 
-        Before the fix, ``build_actions()`` would log a warning and
-        ``continue`` past the packages section, producing zero actions.
-        Now they are generated with ``installer=None``.
+        The synthesized pipx-via-pip bootstrap action must appear with
+        ``installer=None`` when pip itself is also unavailable.
         """
         package_actions = [a for a in preview_no_pip.actions if a.kind == PluginKind.PACKAGE]
         assert len(package_actions) >= 1, 'PACKAGE actions must not be silently skipped'
@@ -105,7 +106,7 @@ class TestBootstrapDeferredPackage:
 class TestBootstrapFullyDeferred:
     """Verify preview when *both* runtime and package providers are missing.
 
-    This extreme scenario (no py, pyenv, pip, python, uv on PATH)
+    This extreme scenario (no py, pyenv, pip, python, uv, pipx on PATH)
     validates that the entire inter-phase deferral chain works: both
     RUNTIME and PACKAGE sections produce deferred actions, allowing the
     execution engine to resolve them sequentially at each phase boundary.
@@ -118,7 +119,7 @@ class TestBootstrapFullyDeferred:
         original_which = __import__('shutil').which
 
         def _which_nothing(cmd: str) -> str | None:
-            if cmd in {'py', 'pyenv', 'pip', 'python', 'uv'}:
+            if cmd in {'py', 'pyenv', 'pip', 'python', 'uv', 'pipx'}:
                 return None
             return original_which(cmd)
 
