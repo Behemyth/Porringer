@@ -6,7 +6,7 @@ Mock SCM environment data.
 from pathlib import Path
 from typing import override
 
-from porringer.core.plugin_schema.scm import ScmEnvironment
+from porringer.core.plugin_schema.scm import CloneParameters, ScmEnvironment
 from porringer.core.schema import Ecosystem
 
 
@@ -26,7 +26,7 @@ class MockScm(ScmEnvironment):
         return Ecosystem('git')
 
     @override
-    async def clone(self, url: str, destination: Path, *, dry: bool = False) -> bool:
+    async def clone(self, params: CloneParameters) -> bool:
         """No-op clone for testing."""
         return True
 

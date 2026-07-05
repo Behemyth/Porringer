@@ -26,7 +26,7 @@ from porringer.core.plugin_schema.project_environment import (
     ProjectInstaller,
 )
 from porringer.core.plugin_schema.runtime import RuntimeContext, RuntimeProvider
-from porringer.core.plugin_schema.scm import ScmEnvironment
+from porringer.core.plugin_schema.scm import CloneParameters, ScmEnvironment
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Ecosystem, Package, PluginKind
 from porringer.schema import (
@@ -1570,9 +1570,11 @@ async def _run_project_install_steps(
     )
 
     success = True
+    returncode: int | None = None
     for args in steps:
         cmd_result = await run_command(args, progress=progress, cwd=effective_dir, timeout=300.0)
         success = cmd_result.returncode == 0
+        returncode = cmd_result.returncode
         if not success:
             break
 
@@ -1582,10 +1584,17 @@ async def _run_project_install_steps(
             success=True,
             message=f'Installed project via {action.installer}',
         )
+    # Detailed subprocess output (stdout/stderr) is streamed live as
+    # ActionProgress events during the run — the CLI surfaces a tail of
+    # it under the failed action.  The result message stays a short,
+    # semantic summary so it remains clean for JSONL/GUI consumers.
+    message = f'Project install failed via {action.installer}'
+    if returncode is not None:
+        message = f'{message} (exit {returncode})'
     return SetupActionResult(
         action=action,
         success=False,
-        message=f'Project install failed via {action.installer}',
+        message=message,
     )
 
 
@@ -1653,11 +1662,12 @@ async def _execute_scm_clone(
 ) -> SetupActionResult:
     """Execute a single SCM_CLONE action.
 
-    When the tool is ``git``, the clone is run via ``run_command`` with progress
-    with ``--progress`` so that stderr progress lines
-    (``Receiving objects: 42%``) are emitted as
-    action progress events in real time.  For other SCM
-    plugins the plugin's ``clone()`` method is called directly.
+    Delegates to the resolved plugin's ``ScmEnvironment.clone()``,
+    threading a progress callback through ``CloneParameters`` so that
+    subprocess output streams as ``ActionProgress`` events in real
+    time (the CLI surfaces the tail under the action on failure) —
+    consistent with how package and project-install actions report
+    progress.
 
     Args:
         action: The SCM clone action.
@@ -1703,25 +1713,15 @@ async def _execute_scm_clone(
     # Only MISSING reaches here — the repository needs cloning.
     logger.info("SCM clone needed: repository not found at '%s'", destination)
 
-    # Progress path for git — use --progress to get real-time
-    # progress on stderr ("Receiving objects: 42%").
-    progress = CommandProgress(
-        action=action,
-        callback=_make_progress_callback(action, event_queue),
-        phase='cloning',
-    )
-
     try:
-        if scm_env.tool_name() == 'git':
-            cmd_result = await run_command(
-                ['git', 'clone', '--progress', url, str(destination)],
-                progress=progress,
-                timeout=600.0,
+        success = await scm_env.clone(
+            CloneParameters(
+                url=url,
+                destination=destination,
+                dry=False,
+                progress_callback=_make_progress_callback(action, event_queue),
             )
-            success = cmd_result.returncode == 0
-        else:
-            # Non-git SCM plugins — delegate to the plugin's clone()
-            success = await scm_env.clone(url, destination, dry=False)
+        )
     except Exception as e:
         return SetupActionResult(action=action, success=False, message=str(e))
 

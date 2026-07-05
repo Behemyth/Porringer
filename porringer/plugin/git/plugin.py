@@ -8,8 +8,9 @@ import logging
 from pathlib import Path
 from typing import override
 
-from porringer.core.plugin_schema.scm import ScmEnvironment
+from porringer.core.plugin_schema.scm import CloneParameters, ScmEnvironment
 from porringer.core.schema import Ecosystem
+from porringer.utility.utility import CommandProgress, run_command
 
 logger = logging.getLogger(__name__)
 
@@ -34,22 +35,48 @@ class GitScm(ScmEnvironment):
         return Ecosystem('git')
 
     @override
-    async def clone(self, url: str, destination: Path, *, dry: bool = False) -> bool:
-        """Clone a Git repository from *url* into *destination*.
+    async def clone(self, params: CloneParameters) -> bool:
+        """Clone a Git repository per *params*.
+
+        Runs ``git clone --progress`` via ``run_command`` so that
+        stderr progress lines (``Receiving objects: 42%``) stream
+        through ``params.progress_callback`` in real time, matching
+        the CLI's per-action output-tail surfacing on failure.
 
         Args:
-            url: The repository URL to clone.
-            destination: Local filesystem path for the clone.
-            dry: If `True`, preview without modifying the filesystem.
+            params: Clone parameters (URL, destination, dry-run flag,
+                optional progress callback).
 
         Returns:
             `True` on success, `False` on failure.
         """
-        if dry:
-            logger.info('Would clone %s into %s', url, destination)
+        if params.dry:
+            logger.info('Would clone %s into %s', params.url, params.destination)
             return True
 
-        return await self._run_bool_command(['git', 'clone', url, str(destination)], label='clone')
+        action = self._build_action(f"Clone '{params.url}'")
+        progress = CommandProgress(
+            action=action,
+            callback=params.progress_callback or (lambda _: None),
+            phase='cloning',
+        )
+        result = await run_command(
+            ['git', 'clone', '--progress', params.url, str(params.destination)],
+            progress=progress,
+            timeout_seconds=600.0,
+        )
+        if result.returncode != 0:
+            logger.error(result.stderr)
+        return result.returncode == 0
+
+    @override
+    def clone_command(self, url: str, destination: Path) -> list[str]:
+        """Return the CLI command for cloning a repository, including ``--progress``.
+
+        Overridden so the previewed command matches what ``clone()``
+        actually runs.
+        """
+        return ['git', 'clone', '--progress', url, str(destination)]
 
     @override
     async def get_remote_urls(self, destination: Path) -> dict[str, str]:

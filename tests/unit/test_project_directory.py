@@ -143,6 +143,45 @@ class TestProjectDirectorySkip:
                 ['mock-project', 'second'],
             ]
 
+    @staticmethod
+    async def test_project_sync_failure_message_includes_exit_code() -> None:
+        """A failed project-install's result message stays short but includes the exit code.
+
+        Detailed subprocess output is streamed live as ActionProgress
+        events (surfaced by the CLI under the failed action) rather
+        than being stuffed into the result message, which stays a
+        clean, single-line summary for JSONL/GUI consumers.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / 'pyproject.toml').touch()
+            action = SetupAction(
+                description='Sync project via mock-project',
+                kind=PluginKind.PROJECT,
+                ecosystem=Ecosystem('python'),
+                installer='mock-project',
+            )
+            plugin = _AvailableProjectEnvironment(PluginParameters(distribution=Distribution(version=Version('0.0.0'))))
+            event_queue = Queue()
+
+            with patch(
+                'porringer.backend.command.core.execution.run_command',
+                new_callable=AsyncMock,
+                return_value=CommandResult(returncode=1, stdout='', stderr='Lockfile hash mismatch, run pdm lock'),
+            ):
+                result = await execution._execute_project_install(
+                    action,
+                    {'mock-project': plugin},
+                    root,
+                    SetupParameters(),
+                    event_queue=event_queue,
+                )
+
+            assert result.success is False
+            assert 'mock-project' in result.message
+            assert 'exit 1' in result.message
+            assert 'Lockfile hash mismatch' not in result.message
+
 
 class TestBatchSetupResultsSkips:
     """Tests for BatchSetupResults.skips, total_skipped, and total_succeeded."""

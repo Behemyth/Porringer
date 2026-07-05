@@ -10,14 +10,31 @@ synchronisation.
 
 import logging
 from abc import abstractmethod
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
+from pydantic import Field
+
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
-from porringer.core.schema import Ecosystem, PluginKind
+from porringer.core.schema import Ecosystem, PackageRef, PluginKind, PorringerModel
+from porringer.schema import ActionProgress, SetupAction
 from porringer.schema.execution import CloneStatus, CloneStatusKind
 
 logger = logging.getLogger(__name__)
+
+
+class CloneParameters(PorringerModel):
+    """Parameters for a repository clone operation."""
+
+    url: str = Field(description='The repository URL to clone')
+    destination: Path = Field(description='Local filesystem path for the clone')
+    dry: bool = Field(default=False, description='If True, rehearses the operation without modifying the filesystem')
+    progress_callback: Callable[[ActionProgress], None] | None = Field(
+        default=None,
+        exclude=True,
+        description='Optional callback for reporting clone progress (line-by-line subprocess output).',
+    )
 
 
 class ScmEnvironment(ToolBasedPlugin):
@@ -51,13 +68,18 @@ class ScmEnvironment(ToolBasedPlugin):
         ...
 
     @abstractmethod
-    async def clone(self, url: str, destination: Path, *, dry: bool = False) -> bool:
-        """Clone a repository from *url* into *destination*.
+    async def clone(self, params: CloneParameters) -> bool:
+        """Clone a repository per *params*.
+
+        Implementers that run a CLI subprocess should observe its
+        output line-by-line (via ``run_command``'s ``progress``
+        parameter) and forward each line to
+        ``params.progress_callback`` when set, so the CLI can surface
+        output under the action when the clone fails.
 
         Args:
-            url: The repository URL to clone.
-            destination: Local filesystem path for the clone.
-            dry: If `True`, preview without modifying the filesystem.
+            params: Clone parameters (URL, destination, dry-run flag,
+                optional progress callback).
 
         Returns:
             `True` on success, `False` on failure.
@@ -214,3 +236,25 @@ class ScmEnvironment(ToolBasedPlugin):
             The CLI command as a list of strings.
         """
         return [self.tool_name(), 'clone', url, str(destination)]
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _build_action(self, description: str, package: PackageRef | None = None) -> SetupAction:
+        """Build a `SetupAction` populated from this plugin's metadata.
+
+        Used to satisfy ``CommandProgress.action``'s type requirement
+        when running a subprocess with line-by-line progress. The
+        engine's own progress callback (threaded in via
+        ``CloneParameters.progress_callback``) always wraps events
+        using the *real* action it tracks — this synthetic action is
+        never used for event routing.
+        """
+        return SetupAction(
+            description=description,
+            kind=self.plugin_kind(),
+            ecosystem=self.ecosystem(),
+            installer=self.tool_name(),
+            package=package,
+        )

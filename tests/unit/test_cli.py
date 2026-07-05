@@ -18,6 +18,8 @@ from porringer.console.entry import app
 from porringer.core.schema import PluginKind
 from porringer.schema import (
     ActionCompletedEvent,
+    ActionProgress,
+    ActionProgressEvent,
     ActionRef,
     ActionStartedEvent,
     PluginInfo,
@@ -33,6 +35,18 @@ _FAKE_PLUGINS = [
 EXPECTED_DUPLICATE_ACTIONS = 2
 
 
+class _FakeConsole:
+    """Tiny stand-in for a Rich Console that records printed renderables."""
+
+    def __init__(self) -> None:
+        """Initialize captured print calls."""
+        self.printed: list[str] = []
+
+    def print(self, *args: Any, **kwargs: Any) -> None:
+        """Capture printed text (rendered to its plain string form)."""
+        self.printed.append(' '.join(str(a) for a in args))
+
+
 class _FakeProgress:
     """Tiny stand-in for Rich Progress used by progress tracker tests."""
 
@@ -40,6 +54,7 @@ class _FakeProgress:
         """Initialize captured task state."""
         self.tasks: list[dict[str, Any]] = []
         self.updates: list[tuple[int, dict[str, Any]]] = []
+        self.console = _FakeConsole()
 
     def add_task(self, description: str, *, total: float | int) -> int:
         """Capture added tasks and return a stable integer task id."""
@@ -190,6 +205,87 @@ class TestSyncProgressTracker:
 
         assert state.active_tasks == {}
         assert state.completed == EXPECTED_DUPLICATE_ACTIONS
+
+
+class TestSyncProgressOutputTail:
+    """Tests for surfacing buffered subprocess output when an action fails."""
+
+    @staticmethod
+    def test_failed_action_prints_buffered_output_tail() -> None:
+        """Streamed output lines are printed under a failed action."""
+        progress = _FakeProgress()
+        state = sync_command._ProgressState(total_actions=1)
+        tracker = sync_command._ProgressTracker(
+            progress=cast(Any, progress),
+            setup_params=SetupParameters(),
+            state=state,
+        )
+        ref = ActionRef.from_indices(0, 0)
+        action = SetupAction(description='pdm install')
+
+        tracker.handle_progress_event(ActionStartedEvent(action=action, action_ref=ref))
+        tracker.handle_progress_event(
+            ActionProgressEvent(
+                action=action,
+                action_ref=ref,
+                progress=ActionProgress(
+                    action=action, phase='install', output='Lockfile hash mismatch', channel='stderr'
+                ),
+            )
+        )
+        tracker.handle_progress_event(
+            ActionProgressEvent(
+                action=action,
+                action_ref=ref,
+                progress=ActionProgress(action=action, phase='install', output='run pdm lock', channel='stderr'),
+            )
+        )
+        tracker.handle_progress_event(
+            ActionCompletedEvent(
+                action=action,
+                result=SetupActionResult(action=action, success=False, message='Project install failed (exit 1)'),
+                action_ref=ref,
+            )
+        )
+
+        printed = '\n'.join(progress.console.printed)
+        assert 'Lockfile hash mismatch' in printed
+        assert 'run pdm lock' in printed
+        assert ref.action_id not in state.output_tails
+
+    @staticmethod
+    def test_successful_action_does_not_print_output_tail() -> None:
+        """Buffered output is discarded (not printed) when the action succeeds."""
+        progress = _FakeProgress()
+        state = sync_command._ProgressState(total_actions=1)
+        tracker = sync_command._ProgressTracker(
+            progress=cast(Any, progress),
+            setup_params=SetupParameters(),
+            state=state,
+        )
+        ref = ActionRef.from_indices(0, 0)
+        action = SetupAction(description='pdm install')
+
+        tracker.handle_progress_event(ActionStartedEvent(action=action, action_ref=ref))
+        tracker.handle_progress_event(
+            ActionProgressEvent(
+                action=action,
+                action_ref=ref,
+                progress=ActionProgress(
+                    action=action, phase='install', output='Resolving dependencies...', channel='stdout'
+                ),
+            )
+        )
+        tracker.handle_progress_event(
+            ActionCompletedEvent(
+                action=action,
+                result=SetupActionResult(action=action, success=True),
+                action_ref=ref,
+            )
+        )
+
+        assert progress.console.printed == []
+        assert state.output_tails == {}
 
 
 class TestCLILoggingLevels:

@@ -9,11 +9,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from packaging.version import Version
 
-from porringer.core.plugin_schema.scm import ScmEnvironment
+from porringer.core.plugin_schema.scm import CloneParameters, ScmEnvironment
 from porringer.core.schema import Distribution, PluginParameters
 from porringer.plugin.git.plugin import GitScm
+from porringer.schema import ActionProgress
 from porringer.schema.execution import CloneStatusKind
 from porringer.test.mock.subprocess import fake_proc as _fake_proc
+from tests.fixtures.command_process import CommandProcess
 
 _PARAMS = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
 
@@ -217,6 +219,74 @@ class TestIsCloned:
             result = await scm.is_cloned(url, tmp_path)
         assert result.kind == CloneStatusKind.URL_MISMATCH
         assert result.remote_url == 'https://github.com/other/different.git'
+
+
+# -- GitScm.clone tests -------------------------------------------------
+
+
+class TestGitScmClone:
+    """Tests for GitScm.clone (progress-streaming, per CloneParameters)."""
+
+    @staticmethod
+    async def test_dry_run_skips_subprocess() -> None:
+        """dry=True returns True without running git."""
+        scm = GitScm(_PARAMS)
+        with patch('porringer.plugin.git.plugin.run_command', new_callable=AsyncMock) as mock_run:
+            result = await scm.clone(
+                CloneParameters(url='https://github.com/org/repo', destination=Path('/tmp/repo'), dry=True)
+            )
+        assert result is True
+        mock_run.assert_not_awaited()
+
+    @staticmethod
+    async def test_streams_progress_and_succeeds(tmp_path: Path, command_process: CommandProcess) -> None:
+        """A successful clone streams stderr progress lines through the callback."""
+        destination = tmp_path / 'repo'
+        command_process.script(
+            ['git', 'clone', '--progress', 'https://github.com/org/repo', str(destination)],
+            stderr=["Cloning into 'repo'...", 'Receiving objects: 100% (3/3), done.'],
+            returncode=0,
+        )
+        events: list[ActionProgress] = []
+        scm = GitScm(_PARAMS)
+
+        result = await scm.clone(
+            CloneParameters(
+                url='https://github.com/org/repo',
+                destination=destination,
+                progress_callback=events.append,
+            )
+        )
+
+        assert result is True
+        assert [e.output for e in events] == [
+            "Cloning into 'repo'...",
+            'Receiving objects: 100% (3/3), done.',
+        ]
+        assert all(e.channel == 'stderr' for e in events)
+
+    @staticmethod
+    async def test_failed_clone_returns_false(tmp_path: Path, command_process: CommandProcess) -> None:
+        """A non-zero exit returns False."""
+        destination = tmp_path / 'repo'
+        command_process.script(
+            ['git', 'clone', '--progress', 'https://github.com/org/repo', str(destination)],
+            stderr=['fatal: repository not found'],
+            returncode=128,
+        )
+
+        scm = GitScm(_PARAMS)
+        result = await scm.clone(CloneParameters(url='https://github.com/org/repo', destination=destination))
+
+        assert result is False
+
+    @staticmethod
+    def test_clone_command_includes_progress_flag() -> None:
+        """clone_command() previews the same --progress flag clone() actually uses."""
+        scm = GitScm(_PARAMS)
+        destination = Path('/tmp/repo')
+        cmd = scm.clone_command('https://github.com/org/repo', destination)
+        assert cmd == ['git', 'clone', '--progress', 'https://github.com/org/repo', str(destination)]
 
     @staticmethod
     async def test_url_mismatch_when_no_remotes(tmp_path: Path) -> None:

@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import tempfile
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +19,7 @@ from typing import Any
 from uuid import uuid4
 
 import typer
+from rich.markup import escape
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskID, TextColumn
 
@@ -46,6 +48,10 @@ DEFAULT_TIMEOUT = 300
 # Arrow prefix for command display
 ARROW = '→'
 
+# Trailing subprocess output lines retained per in-flight action, surfaced
+# under the action's line when it fails.
+_OUTPUT_TAIL_LINES = 15
+
 
 @dataclass(slots=True)
 class _ProgressState:
@@ -55,6 +61,10 @@ class _ProgressState:
     total_actions: int = 0
     active_tasks: dict[str, TaskID] = field(default_factory=dict)
     overall_task: TaskID | None = None
+    output_tails: dict[str, deque[str]] = field(default_factory=dict)
+    """Bounded tail of streamed subprocess output lines per action key,
+    printed under the action when it fails so the CLI shows *why* without
+    requiring ``PORRINGER_TRACE_DIR``."""
 
 
 def _progress_label(strategy: SyncStrategy) -> str:
@@ -108,15 +118,25 @@ class _ProgressTracker:
             else:
                 self.progress.update(task_id, description=f'  [red]{action_desc}[/red]', completed=1)
 
+        tail = self.state.output_tails.pop(action_key, None)
+        if result is not None and not result.success and not result.skipped and tail:
+            self.progress.console.print(f'  [error]{ARROW}[/error] {action_desc} output:')
+            for line in tail:
+                self.progress.console.print(f'    [muted]{escape(line)}[/muted]')
+
         self.state.completed += 1
         overall_task = self.state.overall_task
         if self.state.total_actions > 0 and overall_task is not None:
             self.progress.update(overall_task, completed=self.state.completed)
 
     def handle_action_progress(self, action_key: str, action_desc: str, progress_update: ActionProgress | None) -> None:
-        """Update the progress bar with action progress detail."""
+        """Update the progress bar with action progress detail, and buffer raw output."""
         if progress_update is None or action_key not in self.state.active_tasks:
             return
+
+        if progress_update.output is not None:
+            tail = self.state.output_tails.setdefault(action_key, deque(maxlen=_OUTPUT_TAIL_LINES))
+            tail.append(progress_update.output)
 
         task_id = self.state.active_tasks[action_key]
         phase = progress_update.phase
