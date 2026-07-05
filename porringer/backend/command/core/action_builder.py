@@ -70,9 +70,12 @@ PHASE_ORDER: list[PluginKind] = [
     PluginKind.RUNTIME,
     PluginKind.PACKAGE,
     PluginKind.TOOL,
-    PluginKind.PROJECT,
     PluginKind.SCM,
+    PluginKind.PROJECT,
 ]
+
+# O(1) lookup for the stable sort in `build_actions()`.
+_PHASE_ORDER_INDEX: dict[PluginKind, int] = {kind: i for i, kind in enumerate(PHASE_ORDER)}
 
 
 # Maps SyncStrategy to the human-readable verb used in action descriptions.
@@ -812,6 +815,14 @@ def build_actions(
     implicit_runtime_action = _build_implicit_runtime_action(manifest, resolver, verb, search_from=search_from)
     if implicit_runtime_action is not None:
         actions.append(implicit_runtime_action)
+
+    # Stable-sort into canonical phase order (PHASE_ORDER) so the plan
+    # displayed to the user always matches execution order, regardless
+    # of the (now largely inference-driven) order actions were built in.
+    # Stability preserves manifest-declared order within each kind, and
+    # keeps explicit entries ahead of any synthesized action of the same
+    # kind.
+    actions.sort(key=lambda a: _PHASE_ORDER_INDEX.get(a.kind, len(PHASE_ORDER)))
 
     return actions
 

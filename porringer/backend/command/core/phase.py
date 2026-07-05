@@ -2,8 +2,8 @@
 
 Generalized phase abstraction for the execution pipeline.
 
-Each phase in the setup flow (runtime → packages → tools → project-sync →
-SCM) is represented by a :class:`Phase` instance that
+Each phase in the setup flow (runtime → packages → tools → SCM →
+project-sync) is represented by a :class:`Phase` instance that
 encapsulates the *refresh → resolve-deferred → execute → post-hook* cycle.
 
 The :func:`run_phases` driver replaces the hand-coded per-phase blocks in
@@ -151,26 +151,8 @@ class ToolPhase(_PhaseBase):
         return PhaseResult(results=results, should_continue=ok)
 
 
-class ProjectPhase(_PhaseBase):
-    """Phase 3: install projects (pdm install, uv sync, etc.)."""
-
-    _kind = PluginKind.PROJECT
-
-    @override
-    async def refresh(self, state: ExecutionState) -> None:
-        """Re-discover all plugins so that project environments installed in earlier phases are available."""
-        await asyncio.to_thread(state.refresh_all_plugins)
-
-    async def execute(self, state: ExecutionState) -> PhaseResult:
-        """Run project-install actions."""
-        results = await state.run_project_phase(state.phases[self._kind])
-        failed = any(not r.success and not r.skipped for r in results)
-        ok = not (failed and state.parameters.fail_fast)
-        return PhaseResult(results=results, should_continue=ok)
-
-
 class ScmPhase(_PhaseBase):
-    """Phase 4: clone source-control repositories."""
+    """Phase 3: clone source-control repositories."""
 
     _kind = PluginKind.SCM
 
@@ -187,6 +169,31 @@ class ScmPhase(_PhaseBase):
         return PhaseResult(results=results, should_continue=ok)
 
 
+class ProjectPhase(_PhaseBase):
+    """Phase 4: install projects (pdm install, uv sync, etc.).
+
+    Runs *after* :class:`ScmPhase` so that a project cloned earlier in
+    this same run is already on disk before its sync command executes
+    — cloning a repo and then syncing it makes more sense than the
+    reverse, and previously only "worked" because an implicit sync
+    action only exists when the project is already local.
+    """
+
+    _kind = PluginKind.PROJECT
+
+    @override
+    async def refresh(self, state: ExecutionState) -> None:
+        """Re-discover all plugins so that project environments installed in earlier phases are available."""
+        await asyncio.to_thread(state.refresh_all_plugins)
+
+    async def execute(self, state: ExecutionState) -> PhaseResult:
+        """Run project-install actions."""
+        results = await state.run_project_phase(state.phases[self._kind])
+        failed = any(not r.success and not r.skipped for r in results)
+        ok = not (failed and state.parameters.fail_fast)
+        return PhaseResult(results=results, should_continue=ok)
+
+
 # ---------------------------------------------------------------------------
 # Canonical phase ordering
 # ---------------------------------------------------------------------------
@@ -195,8 +202,8 @@ PHASES: list[Phase] = [
     RuntimePhase(),
     PackagePhase(),
     ToolPhase(),
-    ProjectPhase(),
     ScmPhase(),
+    ProjectPhase(),
 ]
 """The ordered list of phases that :func:`run_phases` iterates."""
 

@@ -120,7 +120,7 @@ porringer install ./my-project --only-action 0:2
 
 ## Execution Order
 
-Porringer installs runtimes before packages and tools, then handles project install and source repositories. After package installation, it discovers plugins again. That lets tools installed earlier in the same run become installers for later actions.
+Porringer installs runtimes before packages and tools, then clones source repositories before running project install. After package installation, it discovers plugins again. That lets tools installed earlier in the same run become installers for later actions — SCM clones run before project install for the same reason: a project referenced only by URL must exist locally before it can be synced.
 
 This is called deferred tool resolution. A tool action whose installer is not available during preview can be created with `installer=None` and resolved just before execution.
 

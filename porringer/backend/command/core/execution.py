@@ -3,7 +3,7 @@
 Phased execution engine.
 
 Orchestrates the multi-phase setup flow: runtime → packages → tools →
-project-install → SCM.  Each phase ensures its prerequisites are met before
+SCM → project-install.  Each phase ensures its prerequisites are met before
 proceeding.
 """
 
@@ -1129,9 +1129,11 @@ async def execute_single(
        re-discovered after Phase 2 so that newly-installed backends
        are available.  Deferred actions whose ``installer`` was
        ``None`` at preview time are resolved here.
-    4. **Project sync** — run ``pdm install`` / ``uv sync`` in the
+    4. **SCM clone** — clone source-control repositories, so a
+       project referenced only by URL exists locally before it is
+       synced.
+    5. **Project sync** — run ``pdm install`` / ``uv sync`` in the
        manifest directory.
-    5. **SCM clone** — clone source-control repositories.
 
     Args:
         preview: The parsed manifest preview containing actions,
