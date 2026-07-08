@@ -6,17 +6,19 @@ A `ProjectInstaller` plugin wraps a project dependency manager
 (PDM, Poetry, uv) and delegates venv creation, dependency resolution,
 and lock-file installation entirely to the underlying tool.
 
-The engine invokes `ProjectInstaller.install_project()` after all
-per-package actions have completed so that the tool itself is already
-installed (e.g. via pipx).  When the manifest file lives in a
-subdirectory of the project root, each plugin auto-discovers the
-correct project root by walking ancestor directories looking for its
-ecosystem's marker file (e.g. `package.json` for Node,
-`pyproject.toml` for Python).
+The engine invokes `ProjectInstaller.command_plan()` to build the
+sync command, then runs its steps directly, after all per-package
+actions have completed so that the tool itself is already installed
+(e.g. via pipx).  `command_plan()` is each plugin's single source of
+truth: the same steps are executed and shown in preview, so a
+previewed command can never diverge from what actually runs.  When
+the manifest file lives in a subdirectory of the project root, each
+plugin auto-discovers the correct project root by walking ancestor
+directories looking for its ecosystem's marker file (e.g.
+`package.json` for Node, `pyproject.toml` for Python).
 """
 
 import json
-import logging
 import tomllib
 from abc import abstractmethod
 from collections.abc import Sequence
@@ -29,8 +31,6 @@ from porringer.core.plugin_schema.manifest import ManifestContributor
 from porringer.core.plugin_schema.runtime import RuntimeConsumer, RuntimeContext
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Ecosystem, ManifestContribution, PluginKind, PorringerModel
-
-logger = logging.getLogger(__name__)
 
 # Default mapping from ecosystem name to the file that marks a project root.
 ECOSYSTEM_MARKERS: dict[Ecosystem, str] = {
@@ -45,18 +45,6 @@ ECOSYSTEM_CONTRIBUTIONS: dict[Ecosystem, ManifestContribution] = {
     ),
     Ecosystem('node'): ManifestContribution(filename='package.json', config_path=('porringer',), file_format='json'),
 }
-
-
-class ProjectInstallParameters(PorringerModel):
-    """Parameters for a project-level sync operation."""
-
-    directory: Path = Field(description='Working directory for the sync command (manifest location)')
-    dry: bool = Field(default=False, description='If True, preview the sync without modifying the environment')
-    runtime_context: RuntimeContext | None = Field(
-        default=None,
-        exclude=True,
-        description='Resolved runtime paths for this execution run.',
-    )
 
 
 class ProjectCommandPlan(PorringerModel):
@@ -91,15 +79,6 @@ class ProjectInstaller(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
 
     Defaults to `"install"` (used by PDM and Poetry).
     Override to `"sync"` for tools like uv.
-    """
-
-    _supports_dry_run: bool = True
-    """Whether the wrapped tool supports a native ``--dry-run`` flag.
-
-    When `True` (the default), `sync()` appends `--dry-run` for dry
-    runs.  Override to `False` for tools that lack it (e.g. pnpm);
-    dry runs then log the command without
-    executing it.
     """
 
     _project_evidence_files: ClassVar[tuple[str, ...]] = ()
@@ -236,25 +215,25 @@ class ProjectInstaller(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
 
         return None
 
-    def project_install_command(self, *, runtime_context: RuntimeContext | None = None) -> list[str]:
-        """Return the CLI command for syncing the project.
+    @classmethod
+    def runtime_selection_args(cls, runtime_context: RuntimeContext | None) -> list[str]:
+        """Return CLI args that select the resolved runtime interpreter.
 
-        Built from `tool_name()` and `_install_verb`, with
-        `--python <path>` appended when *runtime_context* supplies
-        a resolved interpreter for this plugin's consumed runtime kind.
+        The default is no args, because most project tools do not accept
+        an inline interpreter flag on their install verb (``pdm install``
+        rejects ``--python``; Poetry selects interpreters with a separate
+        ``poetry env use`` step). Tools that do support inline selection
+        must opt in explicitly (uv overrides this to return
+        ``['--python', <path>]`` for ``uv sync``).
 
-        This is used for displaying commands in dry-run / preview mode.
+        Never assume one tool's flag syntax generalises: an unrecognised
+        flag makes the whole sync action fail at execution time.
 
         Args:
             runtime_context: Resolved runtime paths for this execution
-                run.  ``None`` means use defaults.
+                run. ``None`` means no runtime was resolved.
         """
-        cmd = [self.tool_name(), self._install_verb]
-        if runtime_context is not None:
-            exe = runtime_context.get(self.consumed_runtime_kind())
-            if exe is not None:
-                cmd.extend(['--python', str(exe)])
-        return cmd
+        return []
 
     @classmethod
     def project_relevance(cls, search_from: Path) -> bool:
@@ -305,61 +284,19 @@ class ProjectInstaller(ToolBasedPlugin, RuntimeConsumer, ManifestContributor):
 
     @classmethod
     def command_plan(cls, search_from: Path, *, runtime_context: RuntimeContext | None = None) -> ProjectCommandPlan:
-        """Build a sync command plan for the provided directory."""
+        """Build a sync command plan for the provided directory.
+
+        This is each plugin's single command-building entry point: the
+        engine executes ``plan.steps`` directly and reuses the same
+        plan for preview display, so what a user confirms is exactly
+        what runs. The default builds one step from `tool_name()`,
+        `_install_verb`, and `runtime_selection_args()`. Override this
+        method when the tool needs a different shape, such as multiple
+        steps (Poetry's separate `poetry env use` step).
+        """
         directory = cls.resolve_project_root(search_from) or search_from
-        cmd = [cls.tool_name(), cls._install_verb]
-        if runtime_context is not None:
-            exe = runtime_context.get(cls.consumed_runtime_kind())
-            if exe is not None:
-                cmd.extend(['--python', str(exe)])
+        cmd = [cls.tool_name(), cls._install_verb, *cls.runtime_selection_args(runtime_context)]
         return ProjectCommandPlan(directory=directory, argv=cmd, steps=[cmd])
-
-    async def install_project(self, params: ProjectInstallParameters) -> bool:
-        """Run the tool's native sync/install in *params.directory*.
-
-        The default implementation builds the command from
-        `sync_command()` (which already includes `--python` when a
-        runtime override is active) and appends `--dry-run` for dry
-        runs when the tool supports it (`_supports_dry_run`).
-
-        When the tool lacks a native `--dry-run` (`_supports_dry_run`
-        is `False`), dry runs log the command without executing it.
-
-        Override this method when the tool requires a different CLI shape
-        (e.g. Poetry needs `poetry env use` before `poetry install`).
-
-        Args:
-            params: Sync parameters (directory, dry-run flag, runtime context).
-
-        Returns:
-            `True` on success, `False` on failure.
-        """
-        args = list(self.project_install_command(runtime_context=params.runtime_context))
-        if params.dry:
-            if not self._supports_dry_run:
-                logger.info('Dry run: %s', ' '.join(args))
-                return True
-            args.append('--dry-run')
-        return await self._run_project_install(args, params.directory)
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    async def _run_project_install(self, args: list[str], directory: Path) -> bool:
-        """Run a sync subprocess and return success.
-
-        Shared helper that handles logging and error handling so each
-        plugin's `sync()` implementation stays minimal.
-
-        Args:
-            args: Full command-line arguments.
-            directory: Working directory.
-
-        Returns:
-            `True` if the process exited cleanly.
-        """
-        return await self._run_bool_command(args, cwd=directory, label='sync')
 
 
 class ProjectEnvironment(ProjectInstaller):
@@ -382,7 +319,7 @@ class NodeProjectInstaller(ProjectInstaller):
 
     Centralises the `node` ecosystem and consumed-runtime kind so that
     each concrete plugin only declares its `tool_name()` and any CLI
-    deviations (e.g. ``_supports_dry_run``).
+    deviations (e.g. `_install_verb`).
     """
 
     @staticmethod

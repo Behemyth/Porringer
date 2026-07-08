@@ -1419,8 +1419,8 @@ async def _execute_project_install_actions(
 ) -> list[SetupActionResult]:
     """Execute project-install actions sequentially.
 
-    Each action invokes the resolved project plugin's
-    `ProjectInstaller.install_project()` method.  When
+    Each action builds the resolved project plugin's
+    `ProjectInstaller.command_plan()` and runs its steps. When
     `parameters.project_directory` is an explicit `Path` it is
     used as the working directory for every plugin.  Otherwise each
     plugin auto-discovers its project root by walking ancestor

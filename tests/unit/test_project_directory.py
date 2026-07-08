@@ -178,6 +178,7 @@ class TestProjectDirectorySkip:
                 )
 
             assert result.success is False
+            assert result.message is not None
             assert 'mock-project' in result.message
             assert 'exit 1' in result.message
             assert 'Lockfile hash mismatch' not in result.message

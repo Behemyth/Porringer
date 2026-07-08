@@ -6,6 +6,7 @@ Implementation of tests that should be overridden in plugins.
 import shutil
 from abc import ABCMeta, abstractmethod
 from collections.abc import Generator
+from pathlib import Path
 from typing import NamedTuple
 from unittest.mock import AsyncMock
 
@@ -13,8 +14,8 @@ from packaging.version import Version
 
 import pytest
 from porringer.core.plugin_schema.environment import Environment, PackageParameters
-from porringer.core.plugin_schema.project_environment import ProjectEnvironment
-from porringer.core.plugin_schema.runtime import RuntimeProvider
+from porringer.core.plugin_schema.project_environment import ProjectEnvironment, ProjectInstaller
+from porringer.core.plugin_schema.runtime import RuntimeContext, RuntimeProvider
 from porringer.core.plugin_schema.scm import ScmEnvironment
 from porringer.core.plugin_schema.tool_based import ToolBasedPlugin
 from porringer.core.schema import Distribution, PackageRef, PluginParameters
@@ -170,14 +171,49 @@ class ProjectEnvironmentUnitTests[T: ProjectEnvironment](
         assert plugin_type.is_available() is False
 
     @staticmethod
-    def test_sync_command_returns_list(plugin_type: type[T]) -> None:
-        """sync_command() should return a non-empty list of strings."""
-        params = PluginParameters(distribution=Distribution(version=Version('0.0.0')))
-        instance = plugin_type(params)
-        cmd = instance.project_install_command()
-        assert isinstance(cmd, list)
-        assert len(cmd) > 0
-        assert all(isinstance(part, str) for part in cmd)
+    def test_plan_returns_nonempty_argv(plugin_type: type[T], tmp_path: Path) -> None:
+        """command_plan() should return a non-empty argv of strings."""
+        plan = plugin_type.command_plan(tmp_path)
+        assert isinstance(plan.argv, list)
+        assert len(plan.argv) > 0
+        assert all(isinstance(part, str) for part in plan.argv)
+
+    @staticmethod
+    def test_bare_plan_has_no_runtime_args(plugin_type: type[T], tmp_path: Path) -> None:
+        """Without a runtime context, the plan must carry none of the plugin's runtime-selection args.
+
+        Regression guard: a resolved runtime must never be required, or
+        silently assumed, to build the bare install command. This is
+        what let the base class's old hardcoded ``--python`` flag reach
+        every project tool, including ones that reject it (``pdm install
+        --python ...`` failed at execution with an argparse error).
+        """
+        assert plugin_type.runtime_selection_args(None) == []
+        bare_plan = plugin_type.command_plan(tmp_path)
+        context = RuntimeContext(executables={plugin_type.consumed_runtime_kind(): Path('/opt/runtime/bin/exe')})
+        declared = plugin_type.runtime_selection_args(context)
+        for step in bare_plan.steps:
+            for arg in declared:
+                assert arg not in step
+
+    @staticmethod
+    def test_runtime_context_only_adds_declared_args(plugin_type: type[T], tmp_path: Path) -> None:
+        """A resolved runtime context must only add the plugin's declared args.
+
+        Applies to plugins that use the base ``command_plan()`` as-is.
+        Plugins that override ``command_plan()`` (e.g. Poetry's separate
+        ``poetry env use`` step) define their own contract and provide
+        their own test coverage instead.
+        """
+        if plugin_type.command_plan.__func__ is not ProjectInstaller.command_plan.__func__:
+            pytest.skip(f'{plugin_type.__name__} overrides command_plan(); covered by its own plugin tests')
+
+        context = RuntimeContext(executables={plugin_type.consumed_runtime_kind(): Path('/opt/runtime/bin/exe')})
+        declared = plugin_type.runtime_selection_args(context)
+
+        bare = plugin_type.command_plan(tmp_path).argv
+        with_context = plugin_type.command_plan(tmp_path, runtime_context=context).argv
+        assert with_context == [*bare, *declared]
 
     @staticmethod
     def test_ecosystem_returns_string(plugin_type: type[T]) -> None:

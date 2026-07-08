@@ -8,7 +8,7 @@ from pathlib import Path
 
 import aiohttp
 
-from porringer.backend.command.core.action_builder import get_cli_command
+from porringer.backend.command.core.action_builder import get_cli_steps
 from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.backend.command.core.execution import determine_fallback_dir, discovered_plugin_entries
 from porringer.backend.command.core.presence import inspect_action
@@ -242,7 +242,8 @@ def _inspection_from_result(
     parameters: SetupParameters,
 ) -> ActionInspection:
     """Create an action inspection record from an inspected result."""
-    cli_command = get_cli_command(action, plugins, parameters.strategy)
+    cli_steps = get_cli_steps(action, plugins, parameters.strategy)
+    cli_command = cli_steps[-1] if cli_steps else ()
     checked = parameters.inspection_mode != InspectionMode.FAST
     return ActionInspection(
         index=index,
@@ -253,6 +254,7 @@ def _inspection_from_result(
         action=action_snapshot(action, index, ref=ref),
         status=_status_from_result(action, result, plugins, checked=checked),
         cli_command=cli_command,
+        cli_steps=cli_steps,
         success=result.success,
         skipped=result.skipped,
         skip_reason=result.skip_reason.name if result.skip_reason is not None else None,

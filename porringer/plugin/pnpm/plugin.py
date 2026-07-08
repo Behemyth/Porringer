@@ -17,12 +17,8 @@ class PNPMEnvironment(Environment, NodeProjectInstaller):
 
     Installs individual packages via ``pnpm add -g`` and also installs
     whole projects via ``pnpm install`` (the project-install capability).
-
-    pnpm does not support ``--dry-run``, so project-install dry runs log
-    the command without executing it.
     """
 
-    _supports_dry_run: bool = False
     _project_evidence_files = ('pnpm-lock.yaml',)
     _package_manager_names = ('pnpm@',)
 

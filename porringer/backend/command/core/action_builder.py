@@ -17,6 +17,7 @@ from packaging.version import InvalidVersion, Version
 
 from porringer.backend.backend import BackendResolver
 from porringer.core.plugin_schema.environment import Environment
+from porringer.core.plugin_schema.project_environment import ProjectInstaller
 from porringer.core.schema import Ecosystem, PackageRef, PluginKind
 from porringer.schema import (
     ManifestMetadata,
@@ -33,6 +34,9 @@ logger = logging.getLogger(__name__)
 
 # Known forges whose URLs are recognised for default-scm-from-url inference.
 _CLONABLE_FORGES = {'github.com', 'gitlab.com', 'bitbucket.org', 'codeberg.org', 'sr.ht'}
+
+# A clonable repo URL path has exactly `owner/repo` segments.
+_OWNER_REPO_SEGMENTS = 2
 
 
 def _clonable_repo_url(url: str) -> str | None:
@@ -56,7 +60,7 @@ def _clonable_repo_url(url: str) -> str | None:
     if parsed.netloc.lower() not in _CLONABLE_FORGES:
         return None
     segments = [s for s in parsed.path.split('/') if s]
-    if len(segments) != 2:
+    if len(segments) != _OWNER_REPO_SEGMENTS:
         return None
     owner, repo = segments
     repo = repo.removesuffix('.git')
@@ -130,12 +134,80 @@ def action_description(
     return f'{verb} {suffix}'
 
 
+def get_cli_steps(
+    action: SetupAction,
+    plugins: DiscoveredPlugins,
+    strategy: SyncStrategy = SyncStrategy.MINIMAL,
+) -> tuple[tuple[str, ...], ...]:
+    """Gets the ordered CLI command steps for an action.
+
+    Most actions run a single command, so this returns a one-element
+    tuple. PROJECT actions can run multiple steps (e.g. Poetry's
+    `poetry env use` before `poetry install`); those plugins return
+    every step so a preview shows exactly what execution will run,
+    never just the final one.
+
+    Args:
+        action: The action to get steps for.
+        plugins: Discovered plugin container.
+        strategy: The sync strategy (determines install vs upgrade command).
+
+    Returns:
+        Ordered command steps, or an empty tuple if not applicable.
+    """
+    environments = plugins.environments
+    project_environments = plugins.project_environments
+    scm_environments = plugins.scm_environments
+    # Preview must show the command execution will actually run, so every
+    # branch forwards the same resolved runtime context execution uses.
+    runtime_context = plugins.runtime_context
+
+    match action.kind:
+        case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
+            if action.installer and action.package and action.installer in environments:
+                env = environments[action.installer]
+                if strategy == SyncStrategy.LATEST:
+                    cmd = env.upgrade_command(
+                        action.package,
+                        include_prereleases=action.include_prereleases,
+                        runtime_context=runtime_context,
+                    )
+                else:
+                    cmd = env.install_command(
+                        action.package,
+                        include_prereleases=action.include_prereleases,
+                        runtime_context=runtime_context,
+                    )
+                return (tuple(cmd),) if cmd else ()
+        case PluginKind.PROJECT:
+            proj_envs = project_environments or {}
+            if action.installer and action.installer in proj_envs:
+                # search_from only affects ProjectCommandPlan.directory (project
+                # root auto-discovery), never the steps we read here, so a
+                # placeholder path is fine for command display purposes.
+                plan = proj_envs[action.installer].command_plan(Path('.'), runtime_context=runtime_context)
+                return tuple(tuple(step) for step in plan.steps)
+        case PluginKind.SCM:
+            scm_envs = scm_environments or {}
+            if action.installer and action.package and action.installer in scm_envs:
+                scm_env = scm_envs[action.installer]
+                cmd = scm_env.clone_command(action.package.name, Path('.'))
+                return (tuple(cmd),) if cmd else ()
+        case None:
+            pass
+    return ()
+
+
 def get_cli_command(
     action: SetupAction,
     plugins: DiscoveredPlugins,
     strategy: SyncStrategy = SyncStrategy.MINIMAL,
 ) -> tuple[str, ...]:
-    """Gets the CLI command string for an action.
+    """Gets the primary CLI command for an action.
+
+    For multi-step PROJECT actions this is the final step (matching
+    `ProjectCommandPlan.argv`'s convention); use `get_cli_steps()` when
+    every step matters, such as rendering a full preview.
 
     Args:
         action: The action to get the command for.
@@ -145,31 +217,8 @@ def get_cli_command(
     Returns:
         The CLI command as a tuple of strings, or empty tuple if not applicable.
     """
-    environments = plugins.environments
-    project_environments = plugins.project_environments
-    scm_environments = plugins.scm_environments
-
-    cmd: list[str] = []
-    match action.kind:
-        case PluginKind.PACKAGE | PluginKind.TOOL | PluginKind.RUNTIME:
-            if action.installer and action.package and action.installer in environments:
-                env = environments[action.installer]
-                if strategy == SyncStrategy.LATEST:
-                    cmd = env.upgrade_command(action.package, include_prereleases=action.include_prereleases)
-                else:
-                    cmd = env.install_command(action.package, include_prereleases=action.include_prereleases)
-        case PluginKind.PROJECT:
-            proj_envs = project_environments or {}
-            if action.installer and action.installer in proj_envs:
-                cmd = proj_envs[action.installer].project_install_command()
-        case PluginKind.SCM:
-            scm_envs = scm_environments or {}
-            if action.installer and action.package and action.installer in scm_envs:
-                scm_env = scm_envs[action.installer]
-                cmd = scm_env.clone_command(action.package.name, Path('.'))
-        case None:
-            pass
-    return tuple(cmd)
+    steps = get_cli_steps(action, plugins, strategy)
+    return steps[-1] if steps else ()
 
 
 def _log_unresolved(resolver: BackendResolver, kind: PluginKind, ecosystem: Ecosystem) -> None:
@@ -255,6 +304,87 @@ def _emit_section_actions(
         )
 
 
+def _select_project_candidate(
+    ecosystem: Ecosystem,
+    candidates: list[str],
+    *,
+    preferences: dict[Ecosystem, str],
+    evidence_by_ecosystem: dict[Ecosystem, list[str]],
+    project_environments: dict[str, ProjectInstaller],
+    resolver: BackendResolver,
+) -> tuple[str | None, str | None]:
+    """Pick which of *candidates* should own project sync for *ecosystem*.
+
+    Returns:
+        A ``(selected, intended)`` pair. ``selected`` is the resolved
+        installer name to run now, or ``None`` when the intended plugin
+        isn't available yet. ``intended`` is the plugin that should
+        eventually own this ecosystem regardless of current
+        availability, used to synthesize a bootstrap TOOL action; it is
+        ``None`` only when no single candidate could be determined at
+        all (ambiguous, no preference or evidence).
+    """
+    preferred = preferences.get(ecosystem)
+    if preferred in candidates:
+        return resolver.resolve(PluginKind.PROJECT, ecosystem), preferred
+
+    evidence_candidates = evidence_by_ecosystem.get(ecosystem, [])
+    if evidence_candidates:
+        suitable_evidence = sorted(
+            name for name in evidence_candidates if project_environments[name].query_availability()
+        )
+        selected = suitable_evidence[0] if suitable_evidence else None
+        return selected, evidence_candidates[0]
+
+    if len(candidates) == 1:
+        return resolver.resolve(PluginKind.PROJECT, ecosystem), candidates[0]
+
+    logger.warning(
+        "Multiple project plugins are relevant for ecosystem '%s' but none has project-specific "
+        'evidence: %s. Set a preference to choose explicitly.',
+        ecosystem,
+        ', '.join(candidates),
+    )
+    return None, None
+
+
+def _synthesize_project_tool_bootstrap(
+    ecosystem: Ecosystem,
+    intended: str,
+    *,
+    project_environments: dict[str, ProjectInstaller],
+    existing_tool_packages: set[tuple[Ecosystem, str]],
+    resolver: BackendResolver,
+    verb: str,
+) -> SetupAction | None:
+    """Synthesize a TOOL install action for *intended*'s own package, if needed.
+
+    The project sync itself can't run yet, so an earlier phase must
+    install the intended plugin's CLI first (e.g. ``pdm`` via
+    ``pipx``). Returns ``None`` when there's nothing to add: no
+    package name, an explicit manifest ``tools`` entry already covers
+    it, or no TOOL plugin is registered for this ecosystem at all.
+    """
+    tool_package_name = project_environments[intended].tool_name()
+    if tool_package_name is None or (ecosystem, tool_package_name) in existing_tool_packages:
+        return None
+
+    tool_installer = resolver.resolve(PluginKind.TOOL, ecosystem)
+    tool_registered = tool_installer is not None or resolver.is_registered(PluginKind.TOOL, ecosystem)
+    if not tool_registered:
+        return None
+
+    package = PackageRef.model_validate(tool_package_name)
+    existing_tool_packages.add((ecosystem, tool_package_name))
+    return SetupAction(
+        description=action_description(PluginKind.TOOL, verb, tool_installer, package=package, registered=True),
+        kind=PluginKind.TOOL,
+        ecosystem=ecosystem,
+        installer=tool_installer,
+        package=package,
+    )
+
+
 def _build_implicit_project_actions(
     plugins: DiscoveredPlugins,
     resolver: BackendResolver,
@@ -304,31 +434,16 @@ def _build_implicit_project_actions(
     }
 
     for ecosystem, candidates in sorted(by_ecosystem.items(), key=lambda item: str(item[0])):
-        preferred = preferences.get(ecosystem)
-        selected: str | None = None
-        intended: str | None = None
-        if preferred in candidates:
-            selected = resolver.resolve(PluginKind.PROJECT, ecosystem)
-            intended = preferred
-        else:
-            evidence_candidates = evidence_by_ecosystem.get(ecosystem, [])
-            if evidence_candidates:
-                suitable_evidence = sorted(
-                    name for name in evidence_candidates if project_environments[name].query_availability()
-                )
-                selected = suitable_evidence[0] if suitable_evidence else None
-                intended = evidence_candidates[0]
-            elif len(candidates) == 1:
-                selected = resolver.resolve(PluginKind.PROJECT, ecosystem)
-                intended = candidates[0]
-            else:
-                logger.warning(
-                    "Multiple project plugins are relevant for ecosystem '%s' but none has project-specific "
-                    'evidence: %s. Set a preference to choose explicitly.',
-                    ecosystem,
-                    ', '.join(candidates),
-                )
-                continue
+        selected, intended = _select_project_candidate(
+            ecosystem,
+            candidates,
+            preferences=preferences,
+            evidence_by_ecosystem=evidence_by_ecosystem,
+            project_environments=project_environments,
+            resolver=resolver,
+        )
+        if intended is None:
+            continue
 
         if selected is None:
             if resolver.is_registered(PluginKind.PROJECT, ecosystem):
@@ -343,29 +458,16 @@ def _build_implicit_project_actions(
             else:
                 _log_unresolved(resolver, PluginKind.PROJECT, ecosystem)
 
-            # The project sync itself can't run yet — synthesize a TOOL
-            # install for the intended plugin's own package (e.g. 'pdm')
-            # so an earlier phase installs it first.
-            if intended is not None:
-                tool_package_name = project_environments[intended].tool_name()
-                if tool_package_name is not None and (ecosystem, tool_package_name) not in existing_tool_packages:
-                    tool_installer = resolver.resolve(PluginKind.TOOL, ecosystem)
-                    tool_registered = tool_installer is not None or resolver.is_registered(PluginKind.TOOL, ecosystem)
-                    if tool_registered:
-                        package = PackageRef.model_validate(tool_package_name)
-                        desc = action_description(
-                            PluginKind.TOOL, verb, tool_installer, package=package, registered=tool_registered
-                        )
-                        actions.append(
-                            SetupAction(
-                                description=desc,
-                                kind=PluginKind.TOOL,
-                                ecosystem=ecosystem,
-                                installer=tool_installer,
-                                package=package,
-                            )
-                        )
-                        existing_tool_packages.add((ecosystem, tool_package_name))
+            bootstrap_action = _synthesize_project_tool_bootstrap(
+                ecosystem,
+                intended,
+                project_environments=project_environments,
+                existing_tool_packages=existing_tool_packages,
+                resolver=resolver,
+                verb=verb,
+            )
+            if bootstrap_action is not None:
+                actions.append(bootstrap_action)
             continue
 
         actions.append(
@@ -708,6 +810,50 @@ def _build_implicit_runtime_action(
     )
 
 
+def _compute_needed_pairs(
+    manifest: SetupManifest,
+    plugins: DiscoveredPlugins,
+    *,
+    search_from: Path,
+) -> set[tuple[PluginKind, Ecosystem]]:
+    """Return the (kind, ecosystem) pairs the resolver needs to resolve.
+
+    Only resolving pairs actually referenced by the manifest or relevant
+    project plugins keeps the resolver from warning about unrelated
+    plugins, and lets the synthesis helpers below (bootstrap, SCM-from-URL,
+    implicit runtime) query real availability instead of assuming it.
+    """
+    needed_pairs: set[tuple[PluginKind, Ecosystem]] = set()
+    for kind, ecosystem, _packages in manifest.iter_sections():
+        needed_pairs.add((kind, ecosystem))
+    for plugin in (plugins.project_environments or {}).values():
+        if plugin.project_relevance(search_from):
+            eco = plugin.ecosystem()
+            needed_pairs.add((PluginKind.PROJECT, eco))
+            needed_pairs.add((PluginKind.TOOL, eco))
+    # Eagerly resolve (kind, ecosystem) pairs for any bootstrap prerequisite
+    # (e.g. pipx -> pip) so `_build_bootstrap_actions` can query real
+    # availability via the resolver instead of assuming it.
+    for plugin in (plugins.environments or {}).values():
+        requirement = type(plugin).bootstrap_requirement()
+        if requirement is None:
+            continue
+        eco = type(plugin).ecosystem()
+        if eco is not None:
+            needed_pairs.add((requirement.kind, eco))
+    # Eagerly resolve (SCM, git) when the manifest has no explicit scm
+    # section but its url looks like a clonable repo, so
+    # `_build_scm_from_url_action` can query real availability.
+    if not manifest.scm and manifest.url is not None and _clonable_repo_url(str(manifest.url)) is not None:
+        needed_pairs.add((PluginKind.SCM, Ecosystem('git')))
+    # Eagerly resolve (RUNTIME, python) when requires-python can be read
+    # from an already-local pyproject.toml, so `_build_implicit_runtime_action`
+    # can query real availability via the resolver.
+    if _PYTHON_ECOSYSTEM not in manifest.runtimes and infer_runtime_from_pyproject(search_from) is not None:
+        needed_pairs.add((PluginKind.RUNTIME, _PYTHON_ECOSYSTEM))
+    return needed_pairs
+
+
 def build_actions(
     manifest: SetupManifest,
     plugins: DiscoveredPlugins | dict[str, Environment],
@@ -745,37 +891,7 @@ def build_actions(
     if search_from is None:
         search_from = Path('.')
 
-    # Only resolve ecosystems actually referenced by this manifest or relevant
-    # project plugins so the resolver doesn't warn about unrelated plugins.
-    needed_pairs: set[tuple[PluginKind, Ecosystem]] = set()
-    for kind, ecosystem, _packages in manifest.iter_sections():
-        needed_pairs.add((kind, ecosystem))
-    for plugin in (plugins.project_environments or {}).values():
-        if plugin.project_relevance(search_from):
-            eco = plugin.ecosystem()
-            needed_pairs.add((PluginKind.PROJECT, eco))
-            needed_pairs.add((PluginKind.TOOL, eco))
-    # Eagerly resolve (kind, ecosystem) pairs for any bootstrap prerequisite
-    # (e.g. pipx -> pip) so `_build_bootstrap_actions` can query real
-    # availability via the resolver instead of assuming it.
-    for plugin in (plugins.environments or {}).values():
-        requirement = type(plugin).bootstrap_requirement()
-        if requirement is None:
-            continue
-        eco = type(plugin).ecosystem()
-        if eco is not None:
-            needed_pairs.add((requirement.kind, eco))
-    # Eagerly resolve (SCM, git) when the manifest has no explicit scm
-    # section but its url looks like a clonable repo, so
-    # `_build_scm_from_url_action` can query real availability.
-    if not manifest.scm and manifest.url is not None and _clonable_repo_url(str(manifest.url)) is not None:
-        needed_pairs.add((PluginKind.SCM, Ecosystem('git')))
-    # Eagerly resolve (RUNTIME, python) when requires-python can be read
-    # from an already-local pyproject.toml, so `_build_implicit_runtime_action`
-    # can query real availability via the resolver.
-    if _PYTHON_ECOSYSTEM not in manifest.runtimes and infer_runtime_from_pyproject(search_from) is not None:
-        needed_pairs.add((PluginKind.RUNTIME, _PYTHON_ECOSYSTEM))
-
+    needed_pairs = _compute_needed_pairs(manifest, plugins, search_from=search_from)
     resolver = BackendResolver(plugins.all_plugins, manifest.preferences, needed_pairs=needed_pairs)
 
     verb = STRATEGY_VERB[strategy]

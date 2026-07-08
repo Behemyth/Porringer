@@ -23,17 +23,31 @@ class UvEnvironment(PythonEnvironment, ProjectInstaller):
     _project_evidence_files = ('uv.lock',)
     _pyproject_tool_tables = (('tool', 'uv'),)
 
+    @classmethod
+    @override
+    def runtime_selection_args(cls, runtime_context: RuntimeContext | None) -> list[str]:
+        """Return `['--python', '<path>']` when an override is active.
+
+        uv accepts an inline interpreter flag on every relevant
+        sub-command (`uv sync`, `uv pip install`), so this single hook
+        serves both the project-sync and package command builders.
+
+        Args:
+            runtime_context: Resolved runtime paths for this execution run.
+        """
+        if runtime_context is not None:
+            exe = runtime_context.get(cls.consumed_runtime_kind())
+            if exe is not None:
+                return ['--python', str(exe)]
+        return []
+
     def _python_args(self, runtime_context: RuntimeContext | None = None) -> list[str]:
         """Return `['--python', '<path>']` when an override is active.
 
         Args:
             runtime_context: Resolved runtime paths for this execution run.
         """
-        if runtime_context is not None:
-            exe = runtime_context.get(self.consumed_runtime_kind())
-            if exe is not None:
-                return ['--python', self.python_command(runtime_context)]
-        return []
+        return self.runtime_selection_args(runtime_context)
 
     @classmethod
     @override

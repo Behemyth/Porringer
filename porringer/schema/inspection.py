@@ -66,6 +66,14 @@ class ActionInspection(PorringerModel):
     action: ActionSnapshot
     status: InspectionStatus
     cli_command: tuple[str, ...] = ()
+    cli_steps: tuple[tuple[str, ...], ...] = ()
+    """Every command step execution will run, in order.
+
+    Most actions run one command, so this is a one-element tuple
+    matching `cli_command`. Multi-step actions (e.g. Poetry's separate
+    `poetry env use` before `poetry install`) list every step, so a
+    renderer can show the full plan instead of only the final command.
+    """
     success: bool
     skipped: bool = False
     skip_reason: str | None = None

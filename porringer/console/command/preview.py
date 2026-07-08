@@ -28,7 +28,6 @@ from porringer.console.common import (
 )
 from porringer.console.schema import ConsoleConfiguration
 from porringer.schema import (
-    ActionInspection,
     InspectionMode,
     InspectionStatus,
     InspectionSummary,
@@ -61,8 +60,8 @@ def _parse_inspection_mode(configuration: ConsoleConfiguration, mode: str) -> In
         raise typer.Exit(EXIT_FAILURE) from exc
 
 
-def _command_text(action: ActionInspection) -> str:
-    r"""Return display text for an inspected action command.
+def _command_text(command: tuple[str, ...]) -> str:
+    r"""Return display text for one command step.
 
     Shortens the leading token to its executable basename, so a full
     interpreter path like ``C:\...\Scripts\python.exe`` becomes
@@ -70,9 +69,7 @@ def _command_text(action: ActionInspection) -> str:
     the rest of the command. Plain command names (``git``, ``pdm``) pass
     through unchanged.
     """
-    if not action.cli_command:
-        return action.action.description
-    head, *rest = action.cli_command
+    head, *rest = command
     return ' '.join((Path(head).name, *rest))
 
 
@@ -152,8 +149,8 @@ def _display_report(configuration: ConsoleConfiguration, report: SyncInspectionR
             output.print(
                 f'\n  {action.index + 1}. {_status_text(action.status)}  [bold]{action.action.description}[/bold]'
             )
-            if action.cli_command:
-                output.print(f'     [muted]❯[/muted] [code]{escape(_command_text(action))}[/code]')
+            for step in action.cli_steps:
+                output.print(f'     [muted]❯[/muted] [code]{escape(_command_text(step))}[/code]')
             if action.message:
                 output.print(f'     [detail]{action.message}[/detail]')
 

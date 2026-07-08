@@ -46,6 +46,7 @@ class TestExecuteScmCloneProgressThreading:
 
         assert result.success is True
         scm.clone.assert_awaited_once()
+        assert scm.clone.await_args is not None
         params = scm.clone.await_args.args[0]
         assert isinstance(params, CloneParameters)
         assert params.url == 'https://github.com/org/repo'
@@ -91,4 +92,5 @@ class TestExecuteScmCloneProgressThreading:
         )
 
         assert result.success is False
+        assert result.message is not None
         assert 'git' in result.message

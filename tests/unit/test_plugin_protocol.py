@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import cache
 from importlib import metadata
+from pathlib import Path
 from typing import Literal, cast
 
 import pytest
@@ -259,10 +260,10 @@ class TestProjectEnvironmentContract:
     """Argv-shape invariants for every ``ProjectEnvironment`` plugin."""
 
     @staticmethod
-    def test_sync_command_shape(project_environment_plugin: ProjectEnvironment) -> None:
-        """``sync_command()`` returns a non-empty argv list referencing the tool."""
+    def test_sync_command_shape(project_environment_plugin: ProjectEnvironment, tmp_path: Path) -> None:
+        """``command_plan()`` returns a non-empty argv list referencing the tool."""
         plugin = project_environment_plugin
-        argv = plugin.project_install_command()
+        argv = type(plugin).command_plan(tmp_path).argv
         _assert_argv(argv, expected_first=plugin.tool_name())
 
     @staticmethod

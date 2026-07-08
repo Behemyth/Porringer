@@ -14,6 +14,8 @@ calls were observed.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from porringer.backend.command.core.discovery import discover_all_plugins
@@ -60,8 +62,9 @@ def test_project_sync_command_performs_no_subprocess(
     name: str,
     plugin: ProjectInstaller,
     command_process: CommandProcess,
+    tmp_path: Path,
 ) -> None:
-    """``sync_command`` is pure."""
+    """``command_plan`` is pure."""
     del name
-    plugin.project_install_command()
+    type(plugin).command_plan(tmp_path)
     command_process.assert_no_calls()
