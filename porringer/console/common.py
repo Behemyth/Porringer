@@ -39,22 +39,27 @@ def confirm_or_abort(configuration: ConsoleConfiguration, *, yes: bool, prompt: 
         return
 
     console = configuration.output.console
-    try:
-        # markup=False: the "[y/N]" default hint would otherwise be parsed
-        # as a (invalid, unclosed) Rich style tag and silently disappear.
-        answer = console.input(f'{prompt} [y/N]: ', markup=False).strip().lower()
-    except KeyboardInterrupt:
-        console.print()
-        configuration.output.print('[muted]Aborted.[/muted]')
-        raise typer.Exit(EXIT_SUCCESS) from None
-    except EOFError:
-        console.print()
-        configuration.output.warning('Aborted. Pass --yes or set PORRINGER_ASSUME_YES=1 to run non-interactively.')
-        raise typer.Exit(EXIT_FAILURE) from None
+    while True:
+        try:
+            # markup=False: the "[y/N]" default hint would otherwise be
+            # parsed as an invalid, unclosed Rich style tag.
+            answer = console.input(f'{prompt} [y/N]: ', markup=False).strip().lower()
+        except KeyboardInterrupt:
+            console.print()
+            configuration.output.print('[muted]Aborted.[/muted]')
+            raise typer.Exit(EXIT_SUCCESS) from None
+        except EOFError:
+            console.print()
+            configuration.output.warning('Aborted. Pass --yes or set PORRINGER_ASSUME_YES=1 to run non-interactively.')
+            raise typer.Exit(EXIT_FAILURE) from None
 
-    if answer not in {'y', 'yes'}:
-        configuration.output.print('[muted]Aborted.[/muted]')
-        raise typer.Exit(EXIT_SUCCESS)
+        if answer in {'y', 'yes'}:
+            return
+        if answer in {'', 'n', 'no'}:
+            configuration.output.print('[muted]Aborted.[/muted]')
+            raise typer.Exit(EXIT_SUCCESS)
+
+        configuration.output.warning('Please answer y or n.')
 
 
 async def sniff_profile(api: API, url: str) -> SetupProfile | None:

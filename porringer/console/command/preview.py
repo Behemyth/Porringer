@@ -7,7 +7,7 @@ import asyncio
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.markup import escape
@@ -118,7 +118,57 @@ def _summary_text(summary: InspectionSummary) -> str:
     return f'{summary.actions} action(s): {body}'
 
 
-def _display_report(configuration: ConsoleConfiguration, report: SyncInspectionReport) -> None:
+def _compact_summary_text(summary: InspectionSummary) -> str:
+    """Render the install plan count without treating advisories as actions."""
+    executable = summary.actions - summary.satisfied - summary.update_available
+    parts = [f'{executable} to execute']
+    if summary.satisfied:
+        parts.append(f'{summary.satisfied} already satisfied')
+    if summary.update_available:
+        parts.append(f'{summary.update_available} update available')
+    return ' · '.join(parts)
+
+
+def _display_action(output: Any, action: Any, *, display_index: int | None = None) -> None:
+    """Render one action and its command steps."""
+    index = action.index + 1 if display_index is None else display_index
+    output.print(f'\n  {index}. {_status_text(action.status)}  [bold]{action.action.description}[/bold]')
+    for step in action.cli_steps:
+        output.print(f'     [muted]❯[/muted] [code]{escape(_command_text(step))}[/code]')
+    if action.message:
+        output.print(f'     [detail]{action.message}[/detail]')
+
+
+def _display_compact_actions(output: Any, actions: tuple[Any, ...]) -> None:
+    """Render executable actions and compact advisory sections for install."""
+    plan_actions = tuple(
+        action
+        for action in actions
+        if action.status not in {InspectionStatus.SATISFIED, InspectionStatus.UPDATE_AVAILABLE}
+    )
+    if plan_actions:
+        output.print('  [heading]Plan:[/heading]')
+        for display_index, action in enumerate(plan_actions, start=1):
+            _display_action(output, action, display_index=display_index)
+
+    satisfied_count = sum(action.status == InspectionStatus.SATISFIED for action in actions)
+    if satisfied_count:
+        output.print(f'  [muted]{satisfied_count} action(s) already satisfied[/muted]')
+
+    updates = tuple(action for action in actions if action.status == InspectionStatus.UPDATE_AVAILABLE)
+    if updates:
+        output.print('\n  [heading]Available updates:[/heading]')
+        for action in updates:
+            message = action.message or action.action.description
+            output.print(f'  [status.update_available]↑[/status.update_available] {escape(message)}')
+
+
+def _display_report(
+    configuration: ConsoleConfiguration,
+    report: SyncInspectionReport,
+    *,
+    compact: bool = False,
+) -> None:
     """Render an inspection report as a scannable action list.
 
     Each action gets its own header line (index, status, description)
@@ -145,23 +195,21 @@ def _display_report(configuration: ConsoleConfiguration, report: SyncInspectionR
             output.print('  [muted]No actions[/muted]')
             continue
 
-        for action in manifest.actions:
-            output.print(
-                f'\n  {action.index + 1}. {_status_text(action.status)}  [bold]{action.action.description}[/bold]'
-            )
-            for step in action.cli_steps:
-                output.print(f'     [muted]❯[/muted] [code]{escape(_command_text(step))}[/code]')
-            if action.message:
-                output.print(f'     [detail]{action.message}[/detail]')
+        if compact:
+            _display_compact_actions(output, manifest.actions)
+        else:
+            for action in manifest.actions:
+                _display_action(output, action)
 
     for failed in report.failed_paths:
         output.print(f'\n[error]Failed:[/error] {failed.path}')
         output.print(f'  [muted]{failed.error}[/muted]')
 
     output.blank()
+    summary_text = _compact_summary_text(report.summary) if compact else _summary_text(report.summary)
     output.print(
         Panel(
-            _summary_text(report.summary),
+            summary_text,
             border_style='success' if report.success else 'error',
         )
     )

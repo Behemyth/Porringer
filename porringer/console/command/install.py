@@ -75,7 +75,7 @@ def _run_manifest_install(
         preview_params = setup_params.model_copy(update={'inspection_mode': InspectionMode.COMPLETE})
         with configuration.output.status('Inspecting...'):
             report = asyncio.run(api.sync.inspect(preview_params))
-        _display_report(configuration, report)
+        _display_report(configuration, report, compact=True)
 
     _confirm_or_abort(configuration, options.yes)
 

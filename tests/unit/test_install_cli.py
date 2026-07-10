@@ -15,6 +15,8 @@ from porringer.api import API
 from porringer.console.entry import app
 from porringer.schema import DownloadResult, InspectionMode, SyncInspectionReport
 
+_EXPECTED_CONFIRMATION_PROMPTS_AFTER_ONE_RETRY = 2
+
 
 def _write_manifest(path: Path, data: dict) -> Path:
     """Write a porringer manifest into *path*."""
@@ -82,6 +84,29 @@ class TestInstallCLI:
         assert inspect_mock.await_args is not None
         (params,) = inspect_mock.await_args.args
         assert params.inspection_mode == InspectionMode.COMPLETE
+
+    @staticmethod
+    def test_invalid_confirmation_input_reprompts(tmp_path: Path, test_config) -> None:
+        """A pasted command is rejected instead of being treated as "no"."""
+        _write_manifest(tmp_path, {'version': '1', 'packages': {'python': ['requests']}})
+        runner = CliRunner()
+
+        with patch(
+            'porringer.backend.command.sync.SyncCommands.inspect',
+            new_callable=AsyncMock,
+            return_value=SyncInspectionReport(),
+        ):
+            result = runner.invoke(
+                app,
+                ['install', str(tmp_path)],
+                obj=test_config,
+                input='d:\\projects\\periapsis\\.venv\\Scripts\\activate.bat\nn\n',
+            )
+
+        assert result.exit_code == 0
+        assert 'Please answer y or n.' in result.output
+        assert result.output.count('Apply this setup plan? [y/N]:') == _EXPECTED_CONFIRMATION_PROMPTS_AFTER_ONE_RETRY
+        assert 'Aborted.' in result.output
 
     @staticmethod
     def test_removed_command_hook_option_is_not_advertised(tmp_path: Path, test_config) -> None:
