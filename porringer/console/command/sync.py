@@ -68,6 +68,7 @@ class _ProgressState:
     requiring ``PORRINGER_TRACE_DIR``."""
     latest_output: dict[str, str] = field(default_factory=dict)
     started_at: dict[str, float] = field(default_factory=dict)
+    verbose_output: bool = False
 
 
 def _progress_label(strategy: SyncStrategy) -> str:
@@ -146,6 +147,11 @@ class _ProgressTracker:
             compact_output = ' '.join(progress_update.output.split())
             if compact_output:
                 self.state.latest_output[action_key] = compact_output
+            if self.state.verbose_output:
+                channel = progress_update.channel or 'output'
+                self.progress.console.print(
+                    f'  [muted]{escape(action_desc)} [{channel}][/muted] {escape(progress_update.output)}'
+                )
 
         task_id = self.state.active_tasks[action_key]
         phase = progress_update.phase
@@ -406,7 +412,7 @@ def _execute_with_progress(
     Returns:
         BatchSetupResults from execution.
     """
-    state = _ProgressState()
+    state = _ProgressState(verbose_output=configuration.verbosity >= 1)
 
     with Progress(
         SpinnerColumn(),

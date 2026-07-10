@@ -320,6 +320,37 @@ class TestSyncProgressOutputTail:
         assert '7s' in updated_description
         assert 'Resolving dependencies' in updated_description
 
+    @staticmethod
+    def test_verbose_action_streams_raw_output_with_channel() -> None:
+        """Verbose mode prints each subprocess line with its channel."""
+        progress = _FakeProgress()
+        state = sync_command._ProgressState(total_actions=1, verbose_output=True)
+        tracker = sync_command._ProgressTracker(
+            progress=cast(Any, progress),
+            setup_params=SetupParameters(),
+            state=state,
+        )
+        ref = ActionRef.from_indices(0, 0)
+        action = SetupAction(description='pdm install')
+
+        tracker.handle_progress_event(ActionStartedEvent(action=action, action_ref=ref))
+        tracker.handle_progress_event(
+            ActionProgressEvent(
+                action=action,
+                action_ref=ref,
+                progress=ActionProgress(
+                    action=action,
+                    phase='project',
+                    output='Installing package [1/2]',
+                    channel='stdout',
+                ),
+            )
+        )
+
+        printed = '\n'.join(progress.console.printed)
+        assert 'pdm install [stdout]' in printed
+        assert 'Installing package [1/2]' in printed
+
 
 class TestSyncFinalOutput:
     """Tests for concise post-execution output."""
