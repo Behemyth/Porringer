@@ -18,6 +18,7 @@ from porringer.backend.command.core.discovery import DiscoveredPlugins
 from porringer.core.plugin_schema.project_environment import ProjectCommandPlan
 from porringer.core.schema import Distribution, Ecosystem, PluginKind, PluginParameters
 from porringer.schema import (
+    ActionProgressEvent,
     BatchSetupResults,
     InspectionStatus,
     SetupAction,
@@ -141,6 +142,16 @@ class TestProjectDirectorySkip:
             assert [call.args[0] for call in mock_run.await_args_list] == [
                 ['mock-project', 'first'],
                 ['mock-project', 'second'],
+            ]
+            progress_events = []
+            while not event_queue.empty():
+                event = event_queue.get_nowait()
+                if isinstance(event, ActionProgressEvent):
+                    progress_events.append(event.progress)
+            step_starts = [progress for progress in progress_events if progress.message in {'Step 1/2', 'Step 2/2'}]
+            assert [(progress.step_index, progress.step_total, progress.command) for progress in step_starts] == [
+                (1, 2, ('mock-project', 'first')),
+                (2, 2, ('mock-project', 'second')),
             ]
 
     @staticmethod

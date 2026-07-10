@@ -65,6 +65,7 @@ class _ProgressState:
     """Bounded tail of streamed subprocess output lines per action key,
     printed under the action when it fails so the CLI shows *why* without
     requiring ``PORRINGER_TRACE_DIR``."""
+    latest_output: dict[str, str] = field(default_factory=dict)
 
 
 def _progress_label(strategy: SyncStrategy) -> str:
@@ -119,6 +120,7 @@ class _ProgressTracker:
                 self.progress.update(task_id, description=f'  [red]{action_desc}[/red]', completed=1)
 
         tail = self.state.output_tails.pop(action_key, None)
+        self.state.latest_output.pop(action_key, None)
         if result is not None and not result.success and not result.skipped and tail:
             self.progress.console.print(f'  [error]{ARROW}[/error] {action_desc} output:')
             for line in tail:
@@ -137,17 +139,22 @@ class _ProgressTracker:
         if progress_update.output is not None:
             tail = self.state.output_tails.setdefault(action_key, deque(maxlen=_OUTPUT_TAIL_LINES))
             tail.append(progress_update.output)
+            compact_output = ' '.join(progress_update.output.split())
+            if compact_output:
+                self.state.latest_output[action_key] = compact_output
 
         task_id = self.state.active_tasks[action_key]
         phase = progress_update.phase
+        step = ''
+        if progress_update.step_index is not None and progress_update.step_total is not None:
+            step = f' step {progress_update.step_index}/{progress_update.step_total}'
+        latest = self.state.latest_output.get(action_key)
+        detail = progress_update.message or latest
 
-        desc = (
-            f'  {action_desc} [{phase}] {progress_update.message}'
-            if progress_update.message
-            else f'  {action_desc} [{phase}]'
-        )
+        desc = f'  {action_desc} [{phase}{step}] {detail}' if detail else f'  {action_desc} [{phase}{step}]'
 
-        max_desc_len = 80
+        console_width = getattr(self.progress.console, 'width', 104)
+        max_desc_len = max(40, console_width - 24)
         if len(desc) > max_desc_len:
             desc = desc[: max_desc_len - 3] + '...'
 

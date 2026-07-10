@@ -1563,15 +1563,43 @@ async def _run_project_install_steps(
     effective_dir = plan.directory
     steps = plan.steps or ([plan.argv] if plan.argv else [])
 
-    progress = CommandProgress(
-        action=action,
-        callback=_make_progress_callback(action, event_queue),
-        phase='install',
-    )
-
     success = True
     returncode: int | None = None
-    for args in steps:
+    step_total = len(steps)
+
+    def make_step_callback(
+        step_number: int,
+        args: list[str],
+    ) -> Callable[[ActionProgress], None]:
+        base_callback = _make_progress_callback(action, event_queue)
+
+        def step_callback(update: ActionProgress) -> None:
+            base_callback(
+                replace(
+                    update,
+                    phase='project',
+                    message=update.message or f'Step {step_number}/{step_total}',
+                    step_index=step_number,
+                    step_total=step_total,
+                    command=tuple(args),
+                )
+            )
+
+        return step_callback
+
+    for step_number, args in enumerate(steps, start=1):
+        step_callback = make_step_callback(step_number, args)
+        step_callback(
+            ActionProgress(
+                action=action,
+                phase='project',
+                message=f'Step {step_number}/{step_total}',
+                step_index=step_number,
+                step_total=step_total,
+                command=tuple(args),
+            )
+        )
+        progress = CommandProgress(action=action, callback=step_callback, phase='project')
         cmd_result = await run_command(args, progress=progress, cwd=effective_dir, timeout=300.0)
         success = cmd_result.returncode == 0
         returncode = cmd_result.returncode

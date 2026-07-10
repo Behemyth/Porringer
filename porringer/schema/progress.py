@@ -31,6 +31,9 @@ class ActionProgress:
         message: Human-readable status line (e.g. `"Downloading ruff-0.8.0.whl (2.1 MB)"`).
         output: Raw output line from the subprocess, for log panel display.
         channel: Which subprocess channel the output came from (`"stdout"` or `"stderr"`).
+            step_index: One-based project command step number, when applicable.
+            step_total: Total project command steps, when applicable.
+            command: The argv for the active project command step, when applicable.
     """
 
     action: SetupAction
@@ -39,6 +42,9 @@ class ActionProgress:
     message: str | None = None
     output: str | None = None
     channel: Literal['stdout', 'stderr'] | None = None
+    step_index: int | None = None
+    step_total: int | None = None
+    command: tuple[str, ...] | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -144,6 +150,9 @@ class ActionProgressSnapshot(PorringerModel):
     message: str | None = None
     output: str | None = None
     channel: Literal['stdout', 'stderr'] | None = None
+    step_index: int | None = None
+    step_total: int | None = None
+    command: tuple[str, ...] | None = None
 
 
 class ManifestProgressSnapshot(PorringerModel):
@@ -279,6 +288,9 @@ def progress_event_snapshot(event: ProgressEvent, *, correlation_id: str | None 
             message=event.progress.message,
             output=event.progress.output,
             channel=event.progress.channel,
+            step_index=event.progress.step_index,
+            step_total=event.progress.step_total,
+            command=event.progress.command,
         ),
     )
 
