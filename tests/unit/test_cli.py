@@ -287,6 +287,33 @@ class TestSyncProgressOutputTail:
         assert progress.console.printed == []
         assert state.output_tails == {}
 
+    @staticmethod
+    def test_active_action_shows_latest_output_and_elapsed_time() -> None:
+        """Active actions show bounded output context and elapsed time."""
+        progress = _FakeProgress()
+        state = sync_command._ProgressState(total_actions=1)
+        tracker = sync_command._ProgressTracker(
+            progress=cast(Any, progress),
+            setup_params=SetupParameters(),
+            state=state,
+        )
+        ref = ActionRef.from_indices(0, 0)
+        action = SetupAction(description='pdm install')
+
+        with patch('porringer.console.command.sync.time.monotonic', side_effect=[100.0, 107.0]):
+            tracker.handle_progress_event(ActionStartedEvent(action=action, action_ref=ref))
+            tracker.handle_progress_event(
+                ActionProgressEvent(
+                    action=action,
+                    action_ref=ref,
+                    progress=ActionProgress(action=action, phase='project', output='Resolving dependencies'),
+                )
+            )
+
+        updated_description = progress.updates[-1][1]['description']
+        assert '7s' in updated_description
+        assert 'Resolving dependencies' in updated_description
+
 
 class TestCLILoggingLevels:
     """Verify --verbose and --debug flags wire to logger.setLevel."""

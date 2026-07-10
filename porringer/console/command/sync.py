@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import tempfile
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -66,6 +67,7 @@ class _ProgressState:
     printed under the action when it fails so the CLI shows *why* without
     requiring ``PORRINGER_TRACE_DIR``."""
     latest_output: dict[str, str] = field(default_factory=dict)
+    started_at: dict[str, float] = field(default_factory=dict)
 
 
 def _progress_label(strategy: SyncStrategy) -> str:
@@ -100,6 +102,7 @@ class _ProgressTracker:
         if self.state.total_actions > 0:
             task_id = self.progress.add_task(f'  {action_desc}', total=1)
             self.state.active_tasks[action_key] = task_id
+            self.state.started_at[action_key] = time.monotonic()
 
     def handle_action_completed(
         self,
@@ -121,6 +124,7 @@ class _ProgressTracker:
 
         tail = self.state.output_tails.pop(action_key, None)
         self.state.latest_output.pop(action_key, None)
+        self.state.started_at.pop(action_key, None)
         if result is not None and not result.success and not result.skipped and tail:
             self.progress.console.print(f'  [error]{ARROW}[/error] {action_desc} output:')
             for line in tail:
@@ -145,13 +149,20 @@ class _ProgressTracker:
 
         task_id = self.state.active_tasks[action_key]
         phase = progress_update.phase
+        started_at = self.state.started_at.get(action_key)
+        elapsed = time.monotonic() - (started_at if started_at is not None else time.monotonic())
+        elapsed_text = f'{elapsed:.0f}s'
         step = ''
         if progress_update.step_index is not None and progress_update.step_total is not None:
             step = f' step {progress_update.step_index}/{progress_update.step_total}'
         latest = self.state.latest_output.get(action_key)
         detail = progress_update.message or latest
 
-        desc = f'  {action_desc} [{phase}{step}] {detail}' if detail else f'  {action_desc} [{phase}{step}]'
+        desc = (
+            f'  {action_desc} [{phase}{step} · {elapsed_text}] {detail}'
+            if detail
+            else f'  {action_desc} [{phase}{step} · {elapsed_text}]'
+        )
 
         console_width = getattr(self.progress.console, 'width', 104)
         max_desc_len = max(40, console_width - 24)
