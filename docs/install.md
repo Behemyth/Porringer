@@ -118,6 +118,20 @@ porringer install ./my-project --only-action 0:2
 | `--record` | Write a replayable JSON run record to the given path. |
 | `--yes`, `-y` | Skip the confirmation prompt. |
 
+## Confirmation and Progress
+
+`install` presents a compact execution plan before it changes the machine. The **Plan** section contains only actions that will run. Already-satisfied actions are collapsed to a count, and updates that `minimal` strategy will not apply appear separately under **Available updates**.
+
+At the prompt, enter `y` or `yes` to continue. Enter `n`, `no`, or leave the response blank to cancel. Other input is rejected and the prompt is shown again, which prevents a pasted shell command from being treated as a cancellation.
+
+During a long project sync, the default display shows the active command step, elapsed time, and its latest output line. Use `-v` to stream every subprocess line with its action and channel:
+
+```shell
+porringer install ./my-project -v
+```
+
+Press Ctrl-C to cancel a human-mode install. Porringer stops the active subprocess and reports the cancellation. The live progress display continues to report the active step and its latest output while a long-running build is active.
+
 ## Execution Order
 
 Porringer installs runtimes before packages and tools, then clones source repositories before running project install. After package installation, it discovers plugins again. That lets tools installed earlier in the same run become installers for later actions — SCM clones run before project install for the same reason: a project referenced only by URL must exist locally before it can be synced.
@@ -304,6 +318,8 @@ porringer install ./my-project --only-action 0:2 --record ./porringer-run.json
 ```
 
 `--jsonl` writes one compact JSON object per progress event and a final `ResultEnvelope` line. `--record` writes a replayable JSON artifact containing setup parameters, captured event snapshots, the final envelope, and timing metadata.
+
+For `action_progress` events, `action_progress.step_index`, `action_progress.step_total`, and `action_progress.command` identify the active command in a multi-step project plan. Completed action results may include `duration_seconds`, `cli_steps`, and `failed_step_index`. These fields let a client identify the failed command without parsing human output.
 
 Treat replay files as local diagnostic artifacts. They include the exact setup parameters used for a run, including local paths and selectors.
 

@@ -320,9 +320,7 @@ def _display_results(
                     f'  [success]{ARROW}[/success] {command_str}{_step_summary(result)}{duration}'
                 )
             else:
-                configuration.output.print(
-                    f'  [error]{ARROW}[/error] {command_str}{_step_summary(result)}{duration}'
-                )
+                configuration.output.print(f'  [error]{ARROW}[/error] {command_str}{_step_summary(result)}{duration}')
                 failed_step = _failed_step_text(result)
                 if failed_step:
                     configuration.output.print(

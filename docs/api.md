@@ -127,6 +127,16 @@ class MyEnvironment(Environment):
 
 Environment plugins must use async package queries and update checks. They should use the helper command methods provided by the base classes instead of blocking subprocess calls.
 
+### Project command plans
+
+`ProjectInstaller.command_plan()` is the single command-building entry point for a project plugin. Porringer uses the returned steps for both preview and execution, so the command a user confirms is the command that runs.
+
+The default plan contains one command built from `tool_name()`, the install verb, and `runtime_selection_args()`. The default runtime-selection arguments are empty. A plugin must opt in only when its tool accepts an inline runtime flag. For example, uv can use `--python`; PDM cannot accept that flag on `pdm install`.
+
+Override `command_plan()` when a tool needs multiple commands. Return every command in `ProjectCommandPlan.steps` in execution order and set `argv` to the primary or final command. Poetry, for example, can run `poetry env use <python>` before `poetry install`. Do not build a separate preview command: Porringer renders and executes the same plan.
+
+Use the public `ProjectEnvironmentUnitTests` base in `porringer.test.pytest.tests` for project plugins. Its inherited tests verify that command plans are tokenized, safe without a runtime context, and only add runtime arguments declared by the plugin.
+
 ## Test Support
 
 `porringer.test.*` is a public plugin-testing toolkit shipped with the package. Plugin packages should use it to verify conformance with Porringer's runtime contracts. It does not belong in production code.

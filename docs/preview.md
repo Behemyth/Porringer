@@ -72,6 +72,7 @@ Each action includes:
 | `status` | `needed`, `satisfied`, `update_available`, `unavailable`, `failed`, `skipped`, or `unknown`. |
 | `action` | JSON-stable action data such as kind, ecosystem, installer, package, and command. |
 | `cli_command` | Native command preview when one can be rendered. |
+| `cli_steps` | Every command step that execution will run, in order. For a one-step action this contains `cli_command`; multi-step project tools can include setup steps before the final install command. |
 | `message` | Presence, update, skip, or error context. |
 
 The report `success` property is false when manifest loading fails, an action fails inspection, or an action is unavailable.
