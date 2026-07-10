@@ -218,6 +218,13 @@ def _format_cli_command(result: SetupActionResult) -> str:
     return result.action.description
 
 
+def _duration_text(result: SetupActionResult) -> str:
+    """Format an optional action duration for the final result line."""
+    if result.duration_seconds is None:
+        return ''
+    return f' ({result.duration_seconds:.1f}s)'
+
+
 def _display_summary(
     configuration: ConsoleConfiguration,
     results: BatchSetupResults,
@@ -274,24 +281,27 @@ def _display_results(
     for manifest_result in results.manifest_results:
         configuration.output.print(f'\n[heading]Manifest:[/heading] {manifest_result.manifest_path}')
 
+        skipped_count = 0
         displayed_count = 0
         for result in manifest_result.results:
+            if result.skipped and result.skip_reason:
+                skipped_count += 1
+                continue
+
             displayed_count += 1
             command_str = _format_cli_command(result)
-
-            if result.skipped and result.skip_reason:
-                # Show skipped packages with reason (e.g., already installed)
-                configuration.output.print(f'  [muted]{ARROW} {command_str}[/muted]')
-                if result.message:
-                    configuration.output.print(f'    [detail]{result.message}[/detail]')
-            elif result.success:
-                configuration.output.print(f'  [success]{ARROW}[/success] {command_str}')
+            duration = _duration_text(result)
+            if result.success:
+                configuration.output.print(f'  [success]{ARROW}[/success] {command_str}{duration}')
             else:
-                configuration.output.print(f'  [error]{ARROW}[/error] {command_str}')
+                configuration.output.print(f'  [error]{ARROW}[/error] {command_str}{duration}')
                 if result.message:
                     configuration.output.print(f'    [muted]{result.message}[/muted]')
 
-        if displayed_count == 0:
+        if skipped_count:
+            configuration.output.print(f'  [muted]{skipped_count} action(s) skipped[/muted]')
+
+        if displayed_count == 0 and not skipped_count:
             configuration.output.print('  [muted]No actions to perform[/muted]')
 
     for path, error in results.failed_paths:

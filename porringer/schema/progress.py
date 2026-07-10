@@ -140,6 +140,7 @@ class SetupActionResultSnapshot(PorringerModel):
     installed_version: str | None = None
     available_version: str | None = None
     cli_command: tuple[str, ...] = Field(default_factory=tuple)
+    duration_seconds: float | None = None
 
 
 class ActionProgressSnapshot(PorringerModel):
@@ -222,6 +223,7 @@ def _snapshot_result(result: SetupActionResult) -> SetupActionResultSnapshot:
         installed_version=result.installed_version,
         available_version=result.available_version,
         cli_command=result.cli_command or (),
+        duration_seconds=result.duration_seconds,
     )
 
 

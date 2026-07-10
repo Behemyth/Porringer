@@ -5,16 +5,19 @@ Test the click cli.
 
 import json
 import logging
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from dirty_equals import IsPartialDict, IsStr
 from packaging.version import Version
+from rich.console import Console
 from typer.testing import CliRunner
 
 from porringer.console.command import sync as sync_command
 from porringer.console.entry import app
+from porringer.console.schema import ConsoleConfiguration
 from porringer.core.schema import PluginKind
 from porringer.schema import (
     ActionCompletedEvent,
@@ -22,10 +25,13 @@ from porringer.schema import (
     ActionProgressEvent,
     ActionRef,
     ActionStartedEvent,
+    BatchSetupResults,
     PluginInfo,
     SetupAction,
     SetupActionResult,
     SetupParameters,
+    SetupResults,
+    SkipReason,
 )
 
 # A minimal fake result so that ``plugin list`` never spawns subprocesses.
@@ -313,6 +319,41 @@ class TestSyncProgressOutputTail:
         updated_description = progress.updates[-1][1]['description']
         assert '7s' in updated_description
         assert 'Resolving dependencies' in updated_description
+
+
+class TestSyncFinalOutput:
+    """Tests for concise post-execution output."""
+
+    @staticmethod
+    def test_final_output_shows_duration_and_collapses_skips() -> None:
+        """Executed actions show duration while skipped actions become a count."""
+        configuration = ConsoleConfiguration(console=Console(record=True))
+        executed = SetupAction(description='pdm install')
+        skipped = SetupAction(description='Install ruff')
+        results = BatchSetupResults(
+            manifest_results=[
+                SetupResults(
+                    manifest_path=Path('porringer.json'),
+                    results=[
+                        SetupActionResult(action=executed, success=True, duration_seconds=12.3),
+                        SetupActionResult(
+                            action=skipped,
+                            success=True,
+                            skipped=True,
+                            skip_reason=SkipReason.ALREADY_INSTALLED,
+                        ),
+                    ],
+                )
+            ]
+        )
+
+        sync_command._display_results(configuration, results)
+
+        output = configuration.console.export_text()
+        assert 'pdm install' in output
+        assert '(12.3s)' in output
+        assert '1 action(s) skipped' in output
+        assert 'Install ruff' not in output
 
 
 class TestCLILoggingLevels:

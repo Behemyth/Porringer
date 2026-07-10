@@ -198,6 +198,8 @@ class SetupActionResult:
             when the action is skipped due to presence detection.
         available_version: The latest upstream version string, populated
             when ``skip_reason`` is ``UPDATE_AVAILABLE``.
+        duration_seconds: Monotonic elapsed execution time, when the action
+            was executed through the evented runner.
     """
 
     action: SetupAction
@@ -208,6 +210,7 @@ class SetupActionResult:
     installed_version: str | None = None
     available_version: str | None = None
     cli_command: tuple[str, ...] | None = None
+    duration_seconds: float | None = None
 
 
 class SyncStrategy(Enum):

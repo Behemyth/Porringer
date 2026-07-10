@@ -12,6 +12,7 @@ import logging
 import os
 import sysconfig
 import threading
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -124,9 +125,14 @@ def _make_progress_callback(
     return _callback
 
 
-def _emit_started(action: SetupAction, ref: ActionRef | None, event_queue: asyncio.Queue[ProgressEvent | None]) -> None:
-    """Emit an ``ActionStartedEvent`` for *action*."""
+def _emit_started(
+    action: SetupAction,
+    ref: ActionRef | None,
+    event_queue: asyncio.Queue[ProgressEvent | None],
+) -> float:
+    """Emit an ``ActionStartedEvent`` and return its monotonic start time."""
     event_queue.put_nowait(ActionStartedEvent(action=action, action_ref=ref))
+    return time.monotonic()
 
 
 def _emit_completed(
@@ -134,8 +140,11 @@ def _emit_completed(
     result: SetupActionResult,
     ref: ActionRef | None,
     event_queue: asyncio.Queue[ProgressEvent | None],
+    started_at: float | None = None,
 ) -> None:
     """Emit an ``ActionCompletedEvent`` for *action*."""
+    if started_at is not None:
+        result.duration_seconds = max(0.0, time.monotonic() - started_at)
     event_queue.put_nowait(ActionCompletedEvent(action=action, result=result, action_ref=ref))
 
 
@@ -350,8 +359,8 @@ class ExecutionState:
                     )
                     setup_skip_results.append(result)
                     ref = _action_ref(a, action_ref_map)
-                    _emit_started(a, ref, self.event_queue)
-                    _emit_completed(a, result, ref, self.event_queue)
+                    started_at = _emit_started(a, ref, self.event_queue)
+                    _emit_completed(a, result, ref, self.event_queue, started_at)
                 else:
                     remaining.append(a)
             actions = remaining
@@ -894,7 +903,7 @@ async def _run_sequential_packages(
     results: list[SetupActionResult] = []
     for action in sequential_actions:
         ref = _action_ref(action, action_ref_map)
-        _emit_started(action, ref, event_queue)
+        started_at = _emit_started(action, ref, event_queue)
         with use_trace_context(_action_trace_context('execute', action, ref, operation='package')):
             result = await execute_package(
                 action,
@@ -909,7 +918,7 @@ async def _run_sequential_packages(
         # action sees fresh state for the same installer.
         if result.success and not result.skipped and package_cache is not None and action.installer:
             package_cache.invalidate_packages(action.installer, ctx.project_path)
-        _emit_completed(action, result, ref, event_queue)
+        _emit_completed(action, result, ref, event_queue, started_at)
         if not result.success and not result.skipped and parameters.fail_fast:
             logger.error(f'Action failed: {action.description} - {result.message}')
             return results, False
@@ -943,7 +952,7 @@ async def _run_parallel_packages(
             await semaphore.acquire()
         try:
             ref = _action_ref(action, action_ref_map)
-            _emit_started(action, ref, event_queue)
+            started_at = _emit_started(action, ref, event_queue)
             try:
                 with use_trace_context(_action_trace_context('execute', action, ref, operation='package')):
                     result = await execute_package(
@@ -956,7 +965,7 @@ async def _run_parallel_packages(
                     )
             except Exception as e:
                 result = SetupActionResult(action=action, success=False, message=str(e))
-            _emit_completed(action, result, ref, event_queue)
+            _emit_completed(action, result, ref, event_queue, started_at)
             results[index] = result
         finally:
             if semaphore is not None:
@@ -1397,8 +1406,8 @@ def skip_actions(
         )
         results.append(result)
         ref = _action_ref(action, action_ref_map)
-        _emit_started(action, ref, event_queue)
-        _emit_completed(action, result, ref, event_queue)
+        started_at = _emit_started(action, ref, event_queue)
+        _emit_completed(action, result, ref, event_queue, started_at)
     return results
 
 
@@ -1443,7 +1452,7 @@ async def _execute_project_install_actions(
 
     for action in project_install_actions:
         ref = _action_ref(action, action_ref_map)
-        _emit_started(action, ref, event_queue)
+        started_at = _emit_started(action, ref, event_queue)
 
         with use_trace_context(_action_trace_context('execute', action, ref, operation='project_install')):
             result = await _execute_project_install(
@@ -1456,7 +1465,7 @@ async def _execute_project_install_actions(
             )
 
         results.append(result)
-        _emit_completed(action, result, ref, event_queue)
+        _emit_completed(action, result, ref, event_queue, started_at)
         if not result.success and parameters.fail_fast:
             logger.error(f'Project install failed: {action.description} - {result.message}')
             break
@@ -1660,7 +1669,7 @@ async def _execute_scm_actions(
 
     for action in scm_actions:
         ref = _action_ref(action, action_ref_map)
-        _emit_started(action, ref, event_queue)
+        started_at = _emit_started(action, ref, event_queue)
 
         with use_trace_context(_action_trace_context('execute', action, ref, operation='scm')):
             result = await _execute_scm_clone(
@@ -1672,7 +1681,7 @@ async def _execute_scm_actions(
             )
 
         results.append(result)
-        _emit_completed(action, result, ref, event_queue)
+        _emit_completed(action, result, ref, event_queue, started_at)
         if not result.success and not result.skipped and parameters.fail_fast:
             logger.error(f'SCM clone failed: {action.description} - {result.message}')
             break
