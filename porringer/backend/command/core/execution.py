@@ -1575,6 +1575,7 @@ async def _run_project_install_steps(
     success = True
     returncode: int | None = None
     step_total = len(steps)
+    failed_step_index: int | None = None
 
     def make_step_callback(
         step_number: int,
@@ -1613,6 +1614,7 @@ async def _run_project_install_steps(
         success = cmd_result.returncode == 0
         returncode = cmd_result.returncode
         if not success:
+            failed_step_index = step_number
             break
 
     if success:
@@ -1620,6 +1622,8 @@ async def _run_project_install_steps(
             action=action,
             success=True,
             message=f'Installed project via {action.installer}',
+            cli_command=tuple(plan.argv),
+            cli_steps=tuple(tuple(step) for step in steps),
         )
     # Detailed subprocess output (stdout/stderr) is streamed live as
     # ActionProgress events during the run — the CLI surfaces a tail of
@@ -1632,6 +1636,9 @@ async def _run_project_install_steps(
         action=action,
         success=False,
         message=message,
+        cli_command=tuple(plan.argv),
+        cli_steps=tuple(tuple(step) for step in steps),
+        failed_step_index=failed_step_index,
     )
 
 

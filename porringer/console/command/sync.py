@@ -231,6 +231,24 @@ def _duration_text(result: SetupActionResult) -> str:
     return f' ({result.duration_seconds:.1f}s)'
 
 
+def _step_summary(result: SetupActionResult) -> str:
+    """Return compact multi-step context for a completed action."""
+    step_count = len(result.cli_steps or ())
+    if step_count <= 1:
+        return ''
+    return f' [{step_count} steps]'
+
+
+def _failed_step_text(result: SetupActionResult) -> str | None:
+    """Return the failed project command step when result metadata identifies it."""
+    if result.failed_step_index is None or not result.cli_steps:
+        return None
+    step_position = result.failed_step_index - 1
+    if step_position < 0 or step_position >= len(result.cli_steps):
+        return None
+    return ' '.join(result.cli_steps[step_position])
+
+
 def _display_summary(
     configuration: ConsoleConfiguration,
     results: BatchSetupResults,
@@ -298,9 +316,18 @@ def _display_results(
             command_str = _format_cli_command(result)
             duration = _duration_text(result)
             if result.success:
-                configuration.output.print(f'  [success]{ARROW}[/success] {command_str}{duration}')
+                configuration.output.print(
+                    f'  [success]{ARROW}[/success] {command_str}{_step_summary(result)}{duration}'
+                )
             else:
-                configuration.output.print(f'  [error]{ARROW}[/error] {command_str}{duration}')
+                configuration.output.print(
+                    f'  [error]{ARROW}[/error] {command_str}{_step_summary(result)}{duration}'
+                )
+                failed_step = _failed_step_text(result)
+                if failed_step:
+                    configuration.output.print(
+                        f'    [error]Failed step {result.failed_step_index}:[/error] {failed_step}'
+                    )
                 if result.message:
                     configuration.output.print(f'    [muted]{result.message}[/muted]')
 

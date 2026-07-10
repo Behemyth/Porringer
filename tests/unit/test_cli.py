@@ -386,6 +386,40 @@ class TestSyncFinalOutput:
         assert '1 action(s) skipped' in output
         assert 'Install ruff' not in output
 
+    @staticmethod
+    def test_final_output_identifies_failed_command_step() -> None:
+        """Failed multi-step actions name the command step that failed."""
+        configuration = ConsoleConfiguration(console=Console(record=True))
+        action = SetupAction(description='poetry install')
+        results = BatchSetupResults(
+            manifest_results=[
+                SetupResults(
+                    manifest_path=Path('porringer.json'),
+                    results=[
+                        SetupActionResult(
+                            action=action,
+                            success=False,
+                            message='Project install failed via poetry (exit 1)',
+                            duration_seconds=3.2,
+                            cli_command=('poetry', 'install'),
+                            cli_steps=(
+                                ('poetry', 'env', 'use', 'python'),
+                                ('poetry', 'install'),
+                            ),
+                            failed_step_index=2,
+                        )
+                    ],
+                )
+            ]
+        )
+
+        sync_command._display_results(configuration, results)
+
+        output = configuration.console.export_text()
+        assert '[2 steps]' in output
+        assert 'Failed step 2: poetry install' in output
+        assert 'Project install failed via poetry (exit 1)' in output
+
 
 class TestCLILoggingLevels:
     """Verify --verbose and --debug flags wire to logger.setLevel."""

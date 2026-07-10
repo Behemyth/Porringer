@@ -141,6 +141,8 @@ class SetupActionResultSnapshot(PorringerModel):
     available_version: str | None = None
     cli_command: tuple[str, ...] = Field(default_factory=tuple)
     duration_seconds: float | None = None
+    cli_steps: tuple[tuple[str, ...], ...] = Field(default_factory=tuple)
+    failed_step_index: int | None = None
 
 
 class ActionProgressSnapshot(PorringerModel):
@@ -224,6 +226,8 @@ def _snapshot_result(result: SetupActionResult) -> SetupActionResultSnapshot:
         available_version=result.available_version,
         cli_command=result.cli_command or (),
         duration_seconds=result.duration_seconds,
+        cli_steps=result.cli_steps or (),
+        failed_step_index=result.failed_step_index,
     )
 
 

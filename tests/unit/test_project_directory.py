@@ -30,6 +30,8 @@ from porringer.schema import (
 from porringer.test.mock.project_environment import MockProjectEnvironment
 from porringer.utility.utility import CommandResult
 
+_SECOND_PROJECT_STEP = 2
+
 
 class _AvailableProjectEnvironment(MockProjectEnvironment):
     """Available project plugin for project-directory tests."""
@@ -153,6 +155,11 @@ class TestProjectDirectorySkip:
                 (1, 2, ('mock-project', 'first')),
                 (2, 2, ('mock-project', 'second')),
             ]
+            assert result.cli_steps == (
+                ('mock-project', 'first'),
+                ('mock-project', 'second'),
+            )
+            assert result.failed_step_index is None
 
     @staticmethod
     async def test_project_sync_failure_message_includes_exit_code() -> None:
@@ -193,6 +200,44 @@ class TestProjectDirectorySkip:
             assert 'mock-project' in result.message
             assert 'exit 1' in result.message
             assert 'Lockfile hash mismatch' not in result.message
+
+    @staticmethod
+    async def test_project_sync_failure_identifies_command_step() -> None:
+        """A failed multi-step project plan records the failing command index."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / 'pyproject.toml').touch()
+            action = SetupAction(
+                description='Sync project via mock-project',
+                kind=PluginKind.PROJECT,
+                ecosystem=Ecosystem('python'),
+                installer='mock-project',
+            )
+            plugin = _MultiStepProjectEnvironment(PluginParameters(distribution=Distribution(version=Version('0.0.0'))))
+            event_queue = Queue()
+
+            with patch(
+                'porringer.backend.command.core.execution.run_command',
+                new_callable=AsyncMock,
+                side_effect=[
+                    CommandResult(returncode=0, stdout='', stderr=''),
+                    CommandResult(returncode=1, stdout='', stderr='failed'),
+                ],
+            ):
+                result = await execution._execute_project_install(
+                    action,
+                    {'mock-project': plugin},
+                    root,
+                    SetupParameters(),
+                    event_queue=event_queue,
+                )
+
+            assert result.success is False
+            assert result.failed_step_index == _SECOND_PROJECT_STEP
+            assert result.cli_steps == (
+                ('mock-project', 'first'),
+                ('mock-project', 'second'),
+            )
 
 
 class TestBatchSetupResultsSkips:

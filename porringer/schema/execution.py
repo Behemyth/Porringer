@@ -200,6 +200,9 @@ class SetupActionResult:
             when ``skip_reason`` is ``UPDATE_AVAILABLE``.
         duration_seconds: Monotonic elapsed execution time, when the action
             was executed through the evented runner.
+        cli_steps: Ordered command steps planned for the action, when it has
+            more than one command.
+        failed_step_index: One-based command step that failed, when known.
     """
 
     action: SetupAction
@@ -211,6 +214,8 @@ class SetupActionResult:
     available_version: str | None = None
     cli_command: tuple[str, ...] | None = None
     duration_seconds: float | None = None
+    cli_steps: tuple[tuple[str, ...], ...] | None = None
+    failed_step_index: int | None = None
 
 
 class SyncStrategy(Enum):
