@@ -424,4 +424,8 @@ def _execute_with_progress(
         transient=True,
     ) as progress:
         tracker = _ProgressTracker(progress=progress, setup_params=setup_params, state=state)
-        return asyncio.run(api.sync.run(setup_params, on_event=tracker.handle_progress_event)).results
+        try:
+            return asyncio.run(api.sync.run(setup_params, on_event=tracker.handle_progress_event)).results
+        except KeyboardInterrupt:
+            configuration.output.warning('Cancelled. The active command was stopped.')
+            raise typer.Exit(1) from None

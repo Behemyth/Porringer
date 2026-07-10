@@ -188,7 +188,7 @@ async def _run_buffered_command(
         async with asyncio.timeout(timeout_seconds):
             stdout_bytes, stderr_bytes = await communicate_or_cancel()
     except (Exception, asyncio.CancelledError) as exc:
-        if isinstance(exc, TimeoutError):
+        if isinstance(exc, (TimeoutError, asyncio.CancelledError)):
             process.kill()
             await process.wait()
         trace.finish(
@@ -273,7 +273,7 @@ async def _run_observed_command(
         async with asyncio.timeout(timeout_seconds):
             await run_with_progress()
     except (Exception, asyncio.CancelledError) as exc:
-        if isinstance(exc, TimeoutError):
+        if isinstance(exc, (TimeoutError, asyncio.CancelledError)):
             process.kill()
             await process.wait()
         trace.finish(

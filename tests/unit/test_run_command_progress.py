@@ -3,6 +3,10 @@
 Tests for subprocess command progress output retention.
 """
 
+import asyncio
+
+import pytest
+
 from porringer.schema import ActionProgress, SetupAction
 from porringer.utility.utility import CommandProgress, run_command
 from tests.fixtures.command_process import CommandProcess
@@ -61,3 +65,17 @@ async def test_run_command_can_retain_full_output(command_process: CommandProces
 
     assert result.stdout == 'one\ntwo\nthree'
     assert not result.stderr
+
+
+async def test_run_command_cancellation_stops_observed_process(command_process: CommandProcess) -> None:
+    """Cancellation of an observed command raises and cleans up the child."""
+    command_process.script(['cancellable'], stdout=['started'])
+    cancellation = asyncio.Event()
+    cancellation.set()
+
+    with pytest.raises(asyncio.CancelledError, match='Operation cancelled'):
+        await run_command(
+            ['cancellable'],
+            progress=CommandProgress(action=_action(), callback=lambda _: None),
+            cancellation_check=cancellation,
+        )
